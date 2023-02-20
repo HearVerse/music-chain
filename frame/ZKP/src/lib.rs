@@ -5,11 +5,12 @@
 /// <https://docs.substrate.io/reference/frame-pallets/>
 pub use pallet::*;
 
-#[cfg(test)]
-mod mock;
+pub mod verifier;
+pub use verifier::*;
 
-#[cfg(test)]
-mod tests;
+use frame_support::storage::bounded_vec::BoundedVec;
+pub use pallet::*;
+
 
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
