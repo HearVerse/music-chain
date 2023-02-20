@@ -20,6 +20,12 @@ frame-system = { version = "4.0.0-dev", default-features = false, path = "../sys
 sp-io = { version = "7.0.0", default-features = false, path = "../../primitives/io" }
 sp-runtime = { version = "7.0.0", default-features = false, path = "../../primitives/runtime" }
 sp-std = { version = "5.0.0", default-features = false, path = "../../primitives/std" }
+bls12_381 = "0.7.0"
+pairing = "0.22.0"
+group = "0.12.1"
+serde = { version = "1.0.149", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1.0.89", default-features = false, features = ["alloc"]}
+uint = { version = "0.8", default-features = false }
 
 [dev-dependencies]
 pallet-balances = { version = "4.0.0-dev", path = "../balances" }
