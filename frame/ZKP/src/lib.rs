@@ -8,12 +8,11 @@ pub use pallet::*;
 pub mod verifier;
 pub use verifier::*;
 
-use frame_support::storage::bounded_vec::BoundedVec;
+pub mod weights;
+pub use weights::*;
+
 pub use pallet::*;
 
-
-#[cfg(feature = "runtime-benchmarks")]
-mod benchmarking;
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -29,7 +28,10 @@ pub mod pallet {
 	pub trait Config: frame_system::Config {
 		/// Because this pallet emits events, it depends on the runtime's definition of an event.
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
+
+		
 	}
+
 
 	// The pallet's runtime storage items.
 	// https://docs.substrate.io/main-docs/build/runtime-storage/
