@@ -11,97 +11,98 @@ pub use verifier::*;
 pub mod weights;
 pub use weights::*;
 
-pub use pallet::*;
+use frame_support::storage::bounded_vec::BoundedVec;
 
+type ProofDef<T> = BoundedVec<u8, <T as Config>::MaxProofLength>;
+type VerificationKey<T> = BoundedVec<u8, <T as Config>::MaxVerificationKeyLength>;
 
 #[frame_support::pallet]
 pub mod pallet {
+	use super::*;
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
 
+	const STORAGE_VERSION: StorageVersion = StorageVersion::new(1);
+
 	#[pallet::pallet]
 	#[pallet::generate_store(pub(super) trait Store)]
+	#[pallet::storage_version(STORAGE_VERSION)]
+	#[pallet::without_storage_info]
 	pub struct Pallet<T>(_);
 
 	/// Configure the pallet by specifying the parameters and types on which it depends.
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
-		/// Because this pallet emits events, it depends on the runtime's definition of an event.
+		/// The overarching event type.
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
+		type WeightInfo: WeightInfo;
 
-		
+		/// The maximum length of the proof.
+		#[pallet::constant]
+		type MaxProofLength: Get<u32>;
+
+		/// The maximum length of the verification key.
+		#[pallet::constant]
+		type MaxVerificationKeyLength: Get<u32>;
 	}
 
-
-	// The pallet's runtime storage items.
-	// https://docs.substrate.io/main-docs/build/runtime-storage/
-	#[pallet::storage]
-	#[pallet::getter(fn something)]
-	// Learn more about declaring storage items:
-	// https://docs.substrate.io/main-docs/build/runtime-storage/#declaring-storage-items
-	pub type Something<T> = StorageValue<_, u32>;
-
-	// Pallets use events to inform users when important changes are made.
-	// https://docs.substrate.io/main-docs/build/events-errors/
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
-		/// Event documentation should end with an array that provides descriptive names for event
-		/// parameters. [something, who]
-		SomethingStored { something: u32, who: T::AccountId },
+		VerificationSetupCompleted,
+		VerificationProofSet,
+		VerificationSuccess,
+		VerificationFailed,
 	}
 
-	// Errors inform users that something went wrong.
 	#[pallet::error]
 	pub enum Error<T> {
-		/// Error names should be descriptive.
-		NoneValue,
-		/// Errors should have helpful documentation associated with them.
-		StorageOverflow,
+		/// The verification key is to long.
+		TooLongVerificationKey,
+		/// The proof is too long.
+		TooLongProof,
+		/// The proof is too short.
+		ProofIsEmpty,
+		/// Verification key, not set.
+		VerificationKeyIsNotSet,
 	}
+	
+	/// Storing a public input.
+	#[pallet::storage]
+	pub type PublicInputStorage<T: Config> = StorageValue<_, u32, ValueQuery>;
+
+	/// Storing a verification key.
+	#[pallet::storage]
+	pub type VerificationKeyStorage<T: Config> = StorageValue<_, VerificationKey<T>, ValueQuery>;
+
 
 	// Dispatchable functions allows users to interact with the pallet and invoke state changes.
 	// These functions materialize as "extrinsics", which are often compared to transactions.
 	// Dispatchable functions must be annotated with a weight and must return a DispatchResult.
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		/// An example dispatchable that takes a singles value as a parameter, writes the value to
-		/// storage and emits an event. This function must be dispatched by a signed extrinsic.
-		#[pallet::call_index(0)]
-		#[pallet::weight(10_000 + T::DbWeight::get().writes(1).ref_time())]
-		pub fn do_something(origin: OriginFor<T>, something: u32) -> DispatchResult {
-			// Check that the extrinsic was signed and get the signer.
-			// This function will return an error if the extrinsic is not signed.
-			// https://docs.substrate.io/main-docs/build/origins/
-			let who = ensure_signed(origin)?;
+	
+		#[pallet::weight(<T as Config>::WeightInfo::setup_verification_benchmark(vec_vk.len()))]
+		pub fn setup_verification(
+			_origin: OriginFor<T>,
+			pub_input: u32,
+			vec_vk: Vec<u8>,
+		) -> DispatchResult {
+			// Setting the public input data.
+			PublicInputStorage::<T>::put(pub_input);
 
-			// Update storage.
-			<Something<T>>::put(something);
-
-			// Emit an event.
-			Self::deposit_event(Event::SomethingStored { something, who });
-			// Return a successful DispatchResultWithPostInfo
+			// Setting the verification key.
+			if vec_vk.is_empty() {
+				VerificationKeyStorage::<T>::kill();
+			} else {
+				let vk: VerificationKey<T> =
+					vec_vk.try_into().map_err(|_| Error::<T>::TooLongVerificationKey)?;
+				VerificationKeyStorage::<T>::put(vk);
+				Self::deposit_event(Event::<T>::VerificationSetupCompleted);
+			}
 			Ok(())
 		}
 
-		/// An example dispatchable that may throw a custom error.
-		#[pallet::call_index(1)]
-		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
-		pub fn cause_error(origin: OriginFor<T>) -> DispatchResult {
-			let _who = ensure_signed(origin)?;
 
-			// Read a value from storage.
-			match <Something<T>>::get() {
-				// Return an error if the value has not been set.
-				None => return Err(Error::<T>::NoneValue.into()),
-				Some(old) => {
-					// Increment the value read from storage; will error in the event of overflow.
-					let new = old.checked_add(1).ok_or(Error::<T>::StorageOverflow)?;
-					// Update the value in storage with the incremented result.
-					<Something<T>>::put(new);
-					Ok(())
-				},
-			}
-		}
 	}
 }

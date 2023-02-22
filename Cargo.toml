@@ -116,6 +116,7 @@ members = [
 	"frame/merkle-mountain-range",
 	"frame/multisig",
 	"frame/nicks",
+	"frame/ZKP",
 	"frame/node-authorization",
 	"frame/offences",
 	"frame/offences/benchmarking",
