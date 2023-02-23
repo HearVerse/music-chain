@@ -66,22 +66,24 @@ pub mod pallet {
 		/// Verification key, not set.
 		VerificationKeyIsNotSet,
 	}
-	
+
 	/// Storing a public input.
 	#[pallet::storage]
 	pub type PublicInputStorage<T: Config> = StorageValue<_, u32, ValueQuery>;
 
+	/// Storing a proof.
+	#[pallet::storage]
+	pub type ProofStorage<T: Config> = StorageValue<_, ProofDef<T>, ValueQuery>;
+
 	/// Storing a verification key.
 	#[pallet::storage]
 	pub type VerificationKeyStorage<T: Config> = StorageValue<_, VerificationKey<T>, ValueQuery>;
-
 
 	// Dispatchable functions allows users to interact with the pallet and invoke state changes.
 	// These functions materialize as "extrinsics", which are often compared to transactions.
 	// Dispatchable functions must be annotated with a weight and must return a DispatchResult.
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-	
 		#[pallet::weight(<T as Config>::WeightInfo::setup_verification_benchmark(vec_vk.len()))]
 		pub fn setup_verification(
 			_origin: OriginFor<T>,
@@ -97,12 +99,36 @@ pub mod pallet {
 			} else {
 				let vk: VerificationKey<T> =
 					vec_vk.try_into().map_err(|_| Error::<T>::TooLongVerificationKey)?;
+
 				VerificationKeyStorage::<T>::put(vk);
 				Self::deposit_event(Event::<T>::VerificationSetupCompleted);
 			}
 			Ok(())
 		}
 
+		#[pallet::weight(<T as Config>::WeightInfo::verify_benchmark(vec_proof.len()))]
+		pub fn verify(_origin: OriginFor<T>, vec_proof: Vec<u8>) -> DispatchResult {
+			
+			ensure!(!vec_proof.is_empty(), Error::<T>::ProofIsEmpty);
 
+			let proof: ProofDef<T> = vec_proof.try_into().map_err(|_| Error::<T>::TooLongProof)?;
+
+			ProofStorage::<T>::put(proof.clone());
+
+			let v = Verifier { key: <VerificationKeyStorage<T>>::get().clone().into_inner() };
+
+			let public_input = PublicInputStorage::<T>::get().clone();
+
+			let is_verify = v
+				.verifier_proof(public_input, proof.into_inner())
+				.map_err(|_| Error::<T>::VerificationKeyIsNotSet)?;
+
+			if is_verify {
+				Self::deposit_event(Event::<T>::VerificationSuccess);
+			} else {
+				Self::deposit_event(Event::<T>::VerificationFailed);
+			}
+			Ok(())
+		}
 	}
 }
