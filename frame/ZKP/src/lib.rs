@@ -5,6 +5,9 @@
 /// <https://docs.substrate.io/reference/frame-pallets/>
 pub use pallet::*;
 
+pub mod deserialization;
+pub use deserialization::*;
+
 pub mod verifier;
 pub use verifier::*;
 
