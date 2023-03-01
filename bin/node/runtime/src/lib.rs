@@ -55,7 +55,6 @@ use pallet_election_provider_multi_phase::SolutionAccuracyOf;
 use pallet_grandpa::{
 	fg_primitives, AuthorityId as GrandpaId, AuthorityList as GrandpaAuthorityList,
 };
-use pallet_ZKP;
 use pallet_im_online::sr25519::AuthorityId as ImOnlineId;
 use pallet_nis::WithMaximumOf;
 use pallet_session::historical::{self as pallet_session_historical};
@@ -1673,14 +1672,6 @@ impl frame_benchmarking_pallet_pov::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 }
 
-/// Configure the pallet-template in pallets/template.
-impl pallet_ZKP::Config for Runtime {
-	type MaxProofLength = ConstU32<1024>;
-	type MaxVerificationKeyLength = ConstU32<1024>;
-	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = pallet_ZKP::weights::SubstrateWeight<Runtime>;
-}
-
 construct_runtime!(
 	pub enum Runtime where
 		Block = Block,
@@ -1747,7 +1738,6 @@ construct_runtime!(
 		FastUnstake: pallet_fast_unstake,
 		MessageQueue: pallet_message_queue,
 		Pov: frame_benchmarking_pallet_pov,
-		ZKP:pallet_ZKP,
 	}
 );
 
