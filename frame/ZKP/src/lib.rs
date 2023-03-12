@@ -6,9 +6,6 @@
 #[macro_use]
 extern crate uint;
 
-#[cfg(feature = "runtime-benchmarks")]
-pub mod benchmarking;
-
 pub mod weights;
 pub use weights::*;
 
