@@ -6032,7 +6032,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-multisig"
-version = "4.0.0-dev"
+version = "0.0.1"
 dependencies = [
  "frame-benchmarking",
  "frame-support",

@@ -114,7 +114,7 @@ members = [
 	"frame/lottery",
 	"frame/membership",
 	"frame/merkle-mountain-range",
-	"frame/multisig",
+	"frame/multi-sig",
 	"frame/nicks",
 	"frame/ZKP",
 	"frame/node-authorization",

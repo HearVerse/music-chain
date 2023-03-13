@@ -2,10 +2,10 @@
 # libssh2 installation details
 ###########################################################################
 
-prefix=/home/kianoush/projects/substrate/scripts/ci/node-template-release/target/debug/build/libssh2-sys-a0987262d71aafe0/out
+prefix=/home/kianoush/projects/music-chain/scripts/ci/node-template-release/target/debug/build/libssh2-sys-a0987262d71aafe0/out
 exec_prefix=
-libdir=/home/kianoush/projects/substrate/scripts/ci/node-template-release/target/debug/build/libssh2-sys-a0987262d71aafe0/out/lib
-includedir=/home/kianoush/projects/substrate/scripts/ci/node-template-release/target/debug/build/libssh2-sys-a0987262d71aafe0/out/include
+libdir=/home/kianoush/projects/music-chain/scripts/ci/node-template-release/target/debug/build/libssh2-sys-a0987262d71aafe0/out/lib
+includedir=/home/kianoush/projects/music-chain/scripts/ci/node-template-release/target/debug/build/libssh2-sys-a0987262d71aafe0/out/include
 
 Name: libssh2
 URL: https://www.libssh2.org/
