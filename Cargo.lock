@@ -5813,6 +5813,7 @@ dependencies = [
  "frame-system",
  "log",
  "pallet-assets",
+ "pallet-balances",
  "parity-scale-codec",
  "scale-info",
  "sp-io",

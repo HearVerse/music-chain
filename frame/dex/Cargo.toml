@@ -23,6 +23,8 @@ sp-io = { version = "7.0.0", default-features = false, path = "../../primitives/
 sp-runtime = { version = "7.0.0", default-features = false, path = "../../primitives/runtime" }
 sp-std = { version = "5.0.0", default-features = false, path = "../../primitives/std" }
 pallet-assets = {default-features = false, version = "4.0.0-dev", path = "../assets" }
+pallet-balances = {default-features = false, version = "4.0.0-dev", path = "../balances" }
+
 
 # third party
 log = { version = "0.4.17", default-features = false }

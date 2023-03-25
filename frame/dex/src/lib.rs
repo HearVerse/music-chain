@@ -1,25 +1,105 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-/// Edit this file to define custom logic or remove it if it is not needed.
-/// Learn more about FRAME and the core library of Substrate FRAME pallets:
-/// <https://docs.substrate.io/reference/frame-pallets/>
+pub mod weights;
+
+use frame_support::traits::Currency;
+use sp_std::prelude::*;
+
 pub use pallet::*;
+pub use weights::WeightInfo;
+
+type AccountIdOf<T> = <T as frame_system::Config>::AccountId;
+type BalanceOf<T> = <<T as Config>::Currency as Currency<AccountIdOf<T>>>::Balance;
+type AssetIdOf<T> = <T as Config>::AssetId;
+type AssetBalanceOf<T> = <T as Config>::AssetBalance;
 
 #[frame_support::pallet]
 pub mod pallet {
-	use frame_support::pallet_prelude::*;
-	use frame_system::pallet_prelude::*;
+    use super::*;
+    use codec::EncodeLike;
+    use frame_support::{
+        pallet_prelude::*,
+        sp_runtime::{
+            traits::{
+                AccountIdConversion, CheckedAdd, CheckedMul, CheckedSub, Convert, One, Saturating,
+                Zero,
+            },
+            FixedPointNumber, FixedPointOperand, FixedU128,
+        },
+        traits::{
+            fungibles::{Create, Destroy, Inspect, Mutate, Transfer},
+            tokens::{Balance, WithdrawConsequence},
+            ExistenceRequirement,
+        },
+        transactional, PalletId,
+    };
+    use frame_system::pallet_prelude::*;
+    use sp_std::fmt::Debug;
 
-	#[pallet::pallet]
-	#[pallet::generate_store(pub(super) trait Store)]
-	pub struct Pallet<T>(_);
+    #[pallet::pallet]
+    #[pallet::generate_store(pub(super) trait Store)]
+    pub struct Pallet<T>(_);
 
-	/// Configure the pallet by specifying the parameters and types on which it depends.
-	#[pallet::config]
-	pub trait Config: frame_system::Config {
-		/// Because this pallet emits events, it depends on the runtime's definition of an event.
-		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
-	}
+    #[pallet::config]
+    pub trait Config: frame_system::Config {
+        /// Pallet ID.
+        #[pallet::constant]
+        type PalletId: Get<PalletId>;
+
+        /// The overarching event type.
+        type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
+
+        /// The currency trait.
+        type Currency: Currency<Self::AccountId>;
+
+        /// The balance type for assets (i.e. tokens).
+        type AssetBalance: Balance
+            + FixedPointOperand
+            + MaxEncodedLen
+            + MaybeSerializeDeserialize
+            + TypeInfo;
+
+        // Two-way conversion between asset and currency balances
+        type AssetToCurrencyBalance: Convert<Self::AssetBalance, BalanceOf<Self>>;
+        type CurrencyToAssetBalance: Convert<BalanceOf<Self>, Self::AssetBalance>;
+
+        /// The asset ID type.
+        type AssetId: MaybeSerializeDeserialize
+            + MaxEncodedLen
+            + TypeInfo
+            + Clone
+            + Debug
+            + PartialEq
+            + EncodeLike
+            + Decode;
+
+        /// The type for tradable assets.
+        type Assets: Inspect<Self::AccountId, AssetId = Self::AssetId, Balance = Self::AssetBalance>
+            + Transfer<Self::AccountId>;
+
+        /// The type for liquidity tokens.
+        type AssetRegistry: Inspect<Self::AccountId, AssetId = Self::AssetId, Balance = Self::AssetBalance>
+            + Mutate<Self::AccountId>
+            + Create<Self::AccountId>
+            + Destroy<Self::AccountId>;
+
+        /// Information on runtime weights.
+        type WeightInfo: WeightInfo;
+
+        /// Provider fee numerator.
+        #[pallet::constant]
+        type ProviderFeeNumerator: Get<BalanceOf<Self>>;
+
+        /// Provider fee denominator.
+        #[pallet::constant]
+        type ProviderFeeDenominator: Get<BalanceOf<Self>>;
+
+        /// Minimum currency deposit for a new exchange.
+        #[pallet::constant]
+        type MinDeposit: Get<BalanceOf<Self>>;
+    }
+
+
 
 	// The pallet's runtime storage items.
 	// https://docs.substrate.io/main-docs/build/runtime-storage/
@@ -48,9 +128,38 @@ pub mod pallet {
 		StorageOverflow,
 	}
 
-	// Dispatchable functions allows users to interact with the pallet and invoke state changes.
-	// These functions materialize as "extrinsics", which are often compared to transactions.
-	// Dispatchable functions must be annotated with a weight and must return a DispatchResult.
+
+    pub trait ConfigHelper: Config {
+        fn pallet_account() -> AccountIdOf<Self>;
+        fn currency_to_asset(curr_balance: BalanceOf<Self>) -> AssetBalanceOf<Self>;
+        fn asset_to_currency(asset_balance: AssetBalanceOf<Self>) -> BalanceOf<Self>;
+        fn net_amount_numerator() -> BalanceOf<Self>;
+    }
+
+    impl<T: Config> ConfigHelper for T {
+        #[inline(always)]
+        fn pallet_account() -> AccountIdOf<Self> {
+            Self::PalletId::get().into_account_truncating()
+        }
+
+        #[inline(always)]
+        fn currency_to_asset(curr_balance: BalanceOf<Self>) -> AssetBalanceOf<Self> {
+            Self::CurrencyToAssetBalance::convert(curr_balance)
+        }
+
+        #[inline(always)]
+        fn asset_to_currency(asset_balance: AssetBalanceOf<Self>) -> BalanceOf<Self> {
+            Self::AssetToCurrencyBalance::convert(asset_balance)
+        }
+
+        #[inline(always)]
+        fn net_amount_numerator() -> BalanceOf<Self> {
+            Self::ProviderFeeDenominator::get()
+                .checked_sub(&Self::ProviderFeeNumerator::get())
+                .expect("Provider fee shouldn't be greater than 100%")
+        }
+    }
+
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
 		/// An example dispatchable that takes a singles value as a parameter, writes the value to
