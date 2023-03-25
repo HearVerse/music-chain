@@ -99,34 +99,108 @@ pub mod pallet {
         type MinDeposit: Get<BalanceOf<Self>>;
     }
 
-
-
-	// The pallet's runtime storage items.
-	// https://docs.substrate.io/main-docs/build/runtime-storage/
 	#[pallet::storage]
 	#[pallet::getter(fn something)]
-	// Learn more about declaring storage items:
-	// https://docs.substrate.io/main-docs/build/runtime-storage/#declaring-storage-items
 	pub type Something<T> = StorageValue<_, u32>;
 
-	// Pallets use events to inform users when important changes are made.
-	// https://docs.substrate.io/main-docs/build/events-errors/
 	#[pallet::event]
-	#[pallet::generate_deposit(pub(super) fn deposit_event)]
-	pub enum Event<T: Config> {
-		/// Event documentation should end with an array that provides descriptive names for event
-		/// parameters. [something, who]
-		SomethingStored { something: u32, who: T::AccountId },
-	}
+    #[pallet::generate_deposit(pub(super) fn deposit_event)]
+    pub enum Event<T: Config> {
+        /// A new exchange was created [asset_id, liquidity_token_id]
+        ExchangeCreated(AssetIdOf<T>, AssetIdOf<T>),
+        /// Liquidity was added to an exchange [provider_id, asset_id, currency_amount, token_amount, liquidity_minted]
+        LiquidityAdded(
+            T::AccountId,
+            AssetIdOf<T>,
+            BalanceOf<T>,
+            AssetBalanceOf<T>,
+            AssetBalanceOf<T>,
+        ),
+        /// Liquidity was removed from an exchange [provider_id, asset_id, currency_amount, token_amount, liquidity_amount]
+        LiquidityRemoved(
+            T::AccountId,
+            AssetIdOf<T>,
+            BalanceOf<T>,
+            AssetBalanceOf<T>,
+            AssetBalanceOf<T>,
+        ),
+        /// Currency was traded for an asset [asset_id, buyer_id, recipient_id, currency_amount, token_amount]
+        CurrencyTradedForAsset(
+            AssetIdOf<T>,
+            T::AccountId,
+            T::AccountId,
+            BalanceOf<T>,
+            AssetBalanceOf<T>,
+        ),
+        /// An asset was traded for currency [asset_id, buyer_id, recipient_id, currency_amount, token_amount]
+        AssetTradedForCurrency(
+            AssetIdOf<T>,
+            T::AccountId,
+            T::AccountId,
+            BalanceOf<T>,
+            AssetBalanceOf<T>,
+        ),
+    }
 
-	// Errors inform users that something went wrong.
-	#[pallet::error]
-	pub enum Error<T> {
-		/// Error names should be descriptive.
-		NoneValue,
-		/// Errors should have helpful documentation associated with them.
-		StorageOverflow,
-	}
+    #[pallet::error]
+    pub enum Error<T> {
+        /// Asset with the specified ID does not exist
+        AssetNotFound,
+        /// Exchange for the given asset already exists
+        ExchangeAlreadyExists,
+        /// Provided liquidity token ID is already taken
+        TokenIdTaken,
+        /// Not enough free balance to add liquidity or perform trade
+        BalanceTooLow,
+        /// Not enough tokens to add liquidity or perform trade
+        NotEnoughTokens,
+        /// Specified account doesn't own enough liquidity in the exchange
+        ProviderLiquidityTooLow,
+        /// No exchange found for the given `asset_id`
+        ExchangeNotFound,
+        /// Zero value provided for trade amount parameter
+        TradeAmountIsZero,
+        /// Zero value provided for `token_amount` parameter
+        TokenAmountIsZero,
+        /// Zero value provided for `max_tokens` parameter
+        MaxTokensIsZero,
+        /// Zero value provided for `currency_amount` parameter
+        CurrencyAmountIsZero,
+        /// Value provided for `currency_amount` parameter is too high
+        CurrencyAmountTooHigh,
+        /// Value provided for `currency_amount` parameter is too low
+        CurrencyAmountTooLow,
+        /// Zero value provided for `min_liquidity` parameter
+        MinLiquidityIsZero,
+        /// Value provided for `max_tokens` parameter is too low
+        MaxTokensTooLow,
+        /// Value provided for `min_liquidity` parameter is too high
+        MinLiquidityTooHigh,
+        /// Zero value provided for `liquidity_amount` parameter
+        LiquidityAmountIsZero,
+        /// Zero value provided for `min_currency` parameter
+        MinCurrencyIsZero,
+        /// Zero value provided for `min_tokens` parameter
+        MinTokensIsZero,
+        /// Value provided for `min_currency` parameter is too high
+        MinCurrencyTooHigh,
+        /// Value provided for `min_tokens` parameter is too high
+        MinTokensTooHigh,
+        /// Value provided for `max_currency` parameter is too low
+        MaxCurrencyTooLow,
+        /// Value provided for `min_bought_tokens` parameter is too high
+        MinBoughtTokensTooHigh,
+        /// Value provided for `max_sold_tokens` parameter is too low
+        MaxSoldTokensTooLow,
+        /// There is not enough liquidity in the exchange to perform trade
+        NotEnoughLiquidity,
+        /// Overflow occurred
+        Overflow,
+        /// Underflow occurred
+        Underflow,
+        /// Deadline specified for the operation has passed
+        DeadlinePassed,
+    }
 
 
     pub trait ConfigHelper: Config {
@@ -162,43 +236,6 @@ pub mod pallet {
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		/// An example dispatchable that takes a singles value as a parameter, writes the value to
-		/// storage and emits an event. This function must be dispatched by a signed extrinsic.
-		#[pallet::call_index(0)]
-		#[pallet::weight(10_000 + T::DbWeight::get().writes(1).ref_time())]
-		pub fn do_something(origin: OriginFor<T>, something: u32) -> DispatchResult {
-			// Check that the extrinsic was signed and get the signer.
-			// This function will return an error if the extrinsic is not signed.
-			// https://docs.substrate.io/main-docs/build/origins/
-			let who = ensure_signed(origin)?;
-
-			// Update storage.
-			<Something<T>>::put(something);
-
-			// Emit an event.
-			Self::deposit_event(Event::SomethingStored { something, who });
-			// Return a successful DispatchResultWithPostInfo
-			Ok(())
-		}
-
-		/// An example dispatchable that may throw a custom error.
-		#[pallet::call_index(1)]
-		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
-		pub fn cause_error(origin: OriginFor<T>) -> DispatchResult {
-			let _who = ensure_signed(origin)?;
-
-			// Read a value from storage.
-			match <Something<T>>::get() {
-				// Return an error if the value has not been set.
-				None => return Err(Error::<T>::NoneValue.into()),
-				Some(old) => {
-					// Increment the value read from storage; will error in the event of overflow.
-					let new = old.checked_add(1).ok_or(Error::<T>::StorageOverflow)?;
-					// Update the value in storage with the incremented result.
-					<Something<T>>::put(new);
-					Ok(())
-				},
-			}
-		}
+	
 	}
 }
