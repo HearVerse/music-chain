@@ -5814,6 +5814,7 @@ dependencies = [
  "log",
  "pallet-assets",
  "pallet-balances",
+ "pallet-contracts",
  "parity-scale-codec",
  "scale-info",
  "sp-io",
