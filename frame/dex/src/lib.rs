@@ -6,13 +6,18 @@ use frame_support::traits::Currency;
 use sp_std::prelude::*;
 
 pub use pallet::*;
+
+
 pub use weights::WeightInfo;
-use pallet_contracts::Config as ContractsConfig;
 
 type AccountIdOf<T> = <T as frame_system::Config>::AccountId;
 type BalanceOf<T> = <<T as Config>::Currency as Currency<AccountIdOf<T>>>::Balance;
 type AssetIdOf<T> = <T as Config>::AssetId;
 type AssetBalanceOf<T> = <T as Config>::AssetBalance;
+type ContractsBalanceOf<T> =
+	<<T as pallet_contracts::Config>::Currency as frame_support::traits::Currency<
+		<T as frame_system::Config>::AccountId,
+	>>::Balance;
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -35,11 +40,12 @@ pub mod pallet {
 		},
 		transactional, PalletId,
 	};
+
 	use frame_system::{pallet_prelude::*, Origin};
 	use sp_std::fmt::Debug;
-
+	pub const MAX_LENGTH: usize = 50;
 	#[pallet::config]
-	pub trait Config: frame_system::Config + TypeInfo {
+	pub trait Config: frame_system::Config + TypeInfo + pallet_contracts::Config {
 		/// Pallet ID.
 		#[pallet::constant]
 		type PalletId: Get<PalletId>;
@@ -142,6 +148,12 @@ pub mod pallet {
 			BalanceOf<T>,
 			AssetBalanceOf<T>,
 		),
+		/// Event to display when call is made from the extrinsic to a smart contract
+		CalledContractFromPallet(T::AccountId),
+		/// Event to display when call is made from a smart contract to the extrinsic
+		CalledPalletFromContract(u32),
+		TotalSupply(T::AccountId, BalanceOf<T>),
+
 	}
 
 	#[pallet::error]
@@ -202,6 +214,8 @@ pub mod pallet {
 		Underflow,
 		/// Deadline specified for the operation has passed
 		DeadlinePassed,
+		InputTooLarge,
+		ContractNotFound,
 	}
 
 	pub trait ConfigHelper: Config {
@@ -274,165 +288,76 @@ pub mod pallet {
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		#[pallet::call_index(2)]
-		#[pallet::weight(<T as Config>::WeightInfo::create_exchange())]
-		#[transactional]
-		pub fn listed_token(origin: OriginFor<T>, contract_address: Vec<u8>) -> DispatchResult {
+		// #[pallet::call_index(9)]
+		// #[pallet::weight(10_000)]
+		// pub fn total_supply(origin: OriginFor<T>, dest: T::AccountId) -> DispatchResult {
+		// 	Self::total_supply_internal(origin, dest)
+		// }
+
+		#[pallet::call_index(9)]
+		#[pallet::weight(10_000)]
+		pub fn total_supply(
+			origin: OriginFor<T>,
+			dest: T::AccountId,
+		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-			let contract_address = contract_address.clone();
+		
+			let mut selector: crate::Vec<u8> = [0xdb, 0x63, 0x75, 0xa8].into();
+		
+			let gas_limit: Weight = T::BlockWeights::get().max_block;
+		
+			let value: BalanceOf<T> = Default::default();
+			let contracts_value: ContractsBalanceOf<T> =
+				<T as pallet_contracts::Config>::Currency::free_balance(&dest);
+		
+			// Check if the contract exists
+			// let contract_info = pallet_contracts::Pallet::<T>::get_contract_info(&dest);
+			// ensure!(contract_info.is_some(), "Contract not found");
+		
+			let mut data = Vec::new();
+			data.append(&mut selector);
+		
+			log::info!("data: {:?} -- {:?} -- {:?}", contracts_value, gas_limit, data);
 
-			let contract_token = ContractToken { contractAddress: contract_address.clone() };
-
-			ContractTokens::<T>::insert(who.clone(), &contract_token);
-
-			Ok(())
-		}
-
-		#[pallet::call_index(0)]
-		#[pallet::weight(<T as Config>::WeightInfo::create_exchange())]
-		#[transactional]
-		pub fn create_exchange(
-			origin: OriginFor<T>,
-			asset_id: AssetIdOf<T>,
-			liquidity_token_id: AssetIdOf<T>,
-			currency_amount: BalanceOf<T>,
-			token_amount: AssetBalanceOf<T>,
-		) -> DispatchResult {
-			// -------------------------- Validation part --------------------------
-			let caller = ensure_signed(origin)?;
-			ensure!(currency_amount >= T::MinDeposit::get(), Error::<T>::CurrencyAmountTooLow);
-			ensure!(token_amount > Zero::zero(), Error::<T>::TokenAmountIsZero);
-			if T::Assets::total_issuance(asset_id.clone()).is_zero() {
-				Err(Error::<T>::AssetNotFound)?
-			}
-			if <Exchanges<T>>::contains_key(asset_id.clone()) {
-				Err(Error::<T>::ExchangeAlreadyExists)?
-			}
-
-			// ----------------------- Create liquidity token ----------------------
-			T::AssetRegistry::create(
-				liquidity_token_id.clone(),
-				T::pallet_account(),
+			let result = pallet_contracts::Pallet::<T>::bare_call(
+				who,
+				dest.clone(),
+				contracts_value,
+				gas_limit,
+				None,
+				data,
 				false,
-				<AssetBalanceOf<T>>::one(),
-			)
-			.map_err(|_| Error::<T>::TokenIdTaken)?;
+				pallet_contracts::Determinism::Deterministic,
+			);
+			log::info!("result: {:?}", result.result);
 
-			// -------------------------- Update storage ---------------------------
-			let exchange = Exchange {
-				asset_id: asset_id.clone(),
-				currency_reserve: <BalanceOf<T>>::zero(),
-				token_reserve: <AssetBalanceOf<T>>::zero(),
-				liquidity_token_id: liquidity_token_id.clone(),
-			};
-			let liquidity_minted = T::currency_to_asset(currency_amount);
-			Self::do_add_liquidity(
-				exchange,
-				currency_amount,
-				token_amount,
-				liquidity_minted,
-				caller,
-			)?;
-
-			// ---------------------------- Emit event -----------------------------
-			Self::deposit_event(Event::ExchangeCreated(asset_id, liquidity_token_id));
-			Ok(())
+			if let Ok(contract_result) = result.result {
+				let data = contract_result.data;
+				let total_supply = BalanceOf::<T>::decode(&mut data.as_slice()).unwrap_or_default();
+				Self::deposit_event(Event::TotalSupply(dest, total_supply));
+				Ok(().into())
+			} else {
+				Ok(().into())
+			}
 		}
-
-		#[pallet::call_index(1)]
-		#[pallet::weight(<T as Config>::WeightInfo::add_liquidity())]
-		pub fn add_liquidity(
-			origin: OriginFor<T>,
-			asset_id: AssetIdOf<T>,
-			currency_amount: BalanceOf<T>,
-			min_liquidity: AssetBalanceOf<T>,
-			max_tokens: AssetBalanceOf<T>,
-			deadline: T::BlockNumber,
-		) -> DispatchResult {
-			// -------------------------- Validation part --------------------------
-			let caller = ensure_signed(origin)?;
-			Self::check_deadline(deadline)?;
-			ensure!(currency_amount > Zero::zero(), Error::<T>::CurrencyAmountIsZero);
-			ensure!(max_tokens > Zero::zero(), Error::<T>::MaxTokensIsZero);
-			ensure!(min_liquidity > Zero::zero(), Error::<T>::MinLiquidityIsZero);
-
-			Ok(())
-		}
+		
 	}
 
 	impl<T: Config> Pallet<T> {
-		pub(crate) fn get_exchange(asset_id: &AssetIdOf<T>) -> Result<ExchangeOf<T>, Error<T>> {
-			<Exchanges<T>>::get(asset_id.clone()).ok_or(Error::<T>::ExchangeNotFound)
-		}
+		// fn total_supply_internal(origin: OriginFor<T>, dest: T::AccountId) -> DispatchResult {
+		// 	let who = ensure_signed(origin)?;
+		// 	ensure!(<ContractTokens<T>>::contains_key(&dest), Error::<T>::ContractNotFound);
 
-		fn check_deadline(deadline: T::BlockNumber) -> DispatchResult {
-			let current_block = frame_system::Pallet::<T>::block_number();
-			ensure!(deadline >= current_block, Error::<T>::DeadlinePassed);
-			Ok(())
-		}
+		// 	let contract_token = ContractTokens::<T>::get(&dest).unwrap();
+		// 	let contract_address =
+		// 		T::AccountId::decode(&mut &contract_token.contractAddress[..]).unwrap();
+		// 		let value = <T as pallet::Config>::Currency::free_balance(&contract_address);
 
-		fn check_enough_currency(
-			account_id: &AccountIdOf<T>,
-			amount: &BalanceOf<T>,
-		) -> Result<(), Error<T>> {
-			ensure!(
-				&<T as Config>::Currency::free_balance(account_id) >= amount,
-				Error::<T>::BalanceTooLow
-			);
-			Ok(())
-		}
+		// 	// Convert value to u32 for the event
+		// 	let contracts_value: u32 = value.saturated_into();
 
-		fn check_enough_tokens(
-			asset_id: &AssetIdOf<T>,
-			account_id: &AccountIdOf<T>,
-			amount: &AssetBalanceOf<T>,
-		) -> Result<(), Error<T>> {
-			match T::Assets::can_withdraw(asset_id.clone(), account_id, *amount) {
-				WithdrawConsequence::Success => Ok(()),
-				WithdrawConsequence::ReducedToZero(_) => Ok(()),
-				WithdrawConsequence::UnknownAsset => Err(Error::<T>::AssetNotFound),
-				_ => Err(Error::<T>::NotEnoughTokens),
-			}
-		}
-
-		#[transactional]
-		fn do_add_liquidity(
-			mut exchange: ExchangeOf<T>,
-			currency_amount: BalanceOf<T>,
-			token_amount: AssetBalanceOf<T>,
-			liquidity_minted: AssetBalanceOf<T>,
-			provider: AccountIdOf<T>,
-		) -> DispatchResult {
-			let asset_id = exchange.asset_id.clone();
-			let pallet_account = T::pallet_account();
-
-			<T as pallet::Config>::Currency::transfer(
-				&provider,
-				&pallet_account,
-				currency_amount,
-				ExistenceRequirement::KeepAlive,
-			)?;
-
-			T::Assets::transfer(asset_id.clone(), &provider, &pallet_account, token_amount, true);
-			T::AssetRegistry::mint_into(
-				exchange.liquidity_token_id.clone(),
-				&provider,
-				liquidity_minted,
-			)?;
-
-			exchange.currency_reserve.saturating_accrue(currency_amount);
-			exchange.token_reserve.saturating_accrue(token_amount);
-			<Exchanges<T>>::insert(asset_id.clone(), exchange);
-
-			Self::deposit_event(Event::LiquidityAdded(
-				provider,
-				asset_id,
-				currency_amount,
-				token_amount,
-				liquidity_minted,
-			));
-
-			Ok(())
-		}
+		// 	Self::deposit_event(Event::CalledPalletFromContract(contracts_value));
+		// 	Ok(())
+		// }
 	}
 }
