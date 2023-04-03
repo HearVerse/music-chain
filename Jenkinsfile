@@ -18,7 +18,6 @@ pipeline {
         script {
           sh "docker build -t ${REGISTRY}/${IMAGE_NAME}:${TAG} ."
         }
-
       }
     }
 
@@ -40,22 +39,23 @@ pipeline {
           // Log out from Docker Hub
           sh "docker logout"
         }
-
       }
     }
 
-    stage('Deploy Substrate project') {
+    stage('Deploy with Docker Compose') {
       when {
         branch 'develop'
       }
       steps {
         script {
-          sh "docker exec -it substrate-node /bin/bash"
-        }
+          // Pull the latest Docker image
+          sh "docker-compose pull"
 
+          // Start the Substrate node using Docker Compose
+          sh "docker-compose up -d"
+        }
       }
     }
-
   }
   environment {
     IMAGE_NAME = 'music_chain'
