@@ -1,8 +1,5 @@
 pipeline {
     agent any
-    tools {
-        dockerTool 'Docker'
-    }
     environment {
         IMAGE_NAME = 'music_chain'
         REGISTRY = 'hearverse'
