@@ -50,7 +50,7 @@ pipeline {
       }
       steps {
         script {
-          sh "docker run -it --name substrate-node -p 30333:30333 -p 9933:9933 -p 9944:9944 ${REGISTRY}/${IMAGE_NAME}:${TAG} --dev"
+          sh "docker exec -it substrate-node /bin/bash"
         }
 
       }
