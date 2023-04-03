@@ -2,7 +2,7 @@ version: '3.3'
 
 services:
   substrate-node:
-    image: hearverse/music-chain:latest
+    image: hearverse/music_chain:latest
     ports:
       - "30333:30333"
       - "9933:9933"
