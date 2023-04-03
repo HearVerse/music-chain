@@ -8,3 +8,5 @@ services:
       - "9933:9933"
       - "9944:9944"
     command: --dev
+    stdin_open: true
+    tty: true
