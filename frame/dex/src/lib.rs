@@ -3,11 +3,9 @@
 pub mod weights;
 
 use frame_support::traits::Currency;
-use sp_std::prelude::*;
-
 pub use pallet::*;
-
-
+use sp_runtime::{traits::AccountIdConversion, MultiAddress};
+use sp_std::prelude::*;
 pub use weights::WeightInfo;
 
 type AccountIdOf<T> = <T as frame_system::Config>::AccountId;
@@ -44,6 +42,7 @@ pub mod pallet {
 	use frame_system::{pallet_prelude::*, Origin};
 	use sp_std::fmt::Debug;
 	pub const MAX_LENGTH: usize = 50;
+
 	#[pallet::config]
 	pub trait Config: frame_system::Config + TypeInfo + pallet_contracts::Config {
 		/// Pallet ID.
@@ -153,7 +152,6 @@ pub mod pallet {
 		/// Event to display when call is made from a smart contract to the extrinsic
 		CalledPalletFromContract(u32),
 		TotalSupply(T::AccountId, BalanceOf<T>),
-
 	}
 
 	#[pallet::error]
@@ -249,6 +247,14 @@ pub mod pallet {
 		}
 	}
 
+	pub struct LiquidityPool<AssetId, Balance> {
+		pub asset0: Balance,
+		pub asset1: Balance,
+		pub shares: Balance,
+		pub asset0_id: AssetId,
+		pub asset1_id: AssetId,
+	}
+
 	#[derive(
 		Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, Default, MaxEncodedLen, TypeInfo,
 	)]
@@ -298,49 +304,79 @@ pub mod pallet {
 		#[pallet::weight(10_000)]
 		pub fn total_supply(
 			origin: OriginFor<T>,
-			dest: T::AccountId,
+			token: T::AccountId,
+			currency: T::AccountId,
+			currency_amount: BalanceOf<T>,
+			token_amount: BalanceOf<T>,
 		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-		
-			let mut selector: crate::Vec<u8> = [0xdb, 0x63, 0x75, 0xa8].into();
-		
+
+			// this selectot for find the total supply of the contract
+			// let mut selector: crate::Vec<u8> = [0xdb, 0x63, 0x75, 0xa8].into();
+
+			// this selector for send from the contract to the user
+			let mut selector: crate::Vec<u8> = [0x84, 0xa1, 0x5d, 0xa1].into();
+
 			let gas_limit: Weight = T::BlockWeights::get().max_block;
-		
+
 			let value: BalanceOf<T> = Default::default();
+
 			let contracts_value: ContractsBalanceOf<T> =
-				<T as pallet_contracts::Config>::Currency::free_balance(&dest);
-		
+				<T as pallet_contracts::Config>::Currency::free_balance(&token);
+
 			// Check if the contract exists
 			// let contract_info = pallet_contracts::Pallet::<T>::get_contract_info(&dest);
 			// ensure!(contract_info.is_some(), "Contract not found");
-		
+			let mut encoded = MultiAddress::<AccountIdOf<T>, u32>::Id(token.clone()).encode();
+
 			let mut data = Vec::new();
-			data.append(&mut selector);
-		
-			log::info!("data: {:?} -- {:?} -- {:?}", contracts_value, gas_limit, data);
+			data.append(&mut selector.clone());
+			data.append(&mut token_amount.encode());
+			data.append(&mut encoded);
 
-			let result = pallet_contracts::Pallet::<T>::bare_call(
-				who,
-				dest.clone(),
-				contracts_value,
-				gas_limit,
-				None,
-				data,
-				false,
-				pallet_contracts::Determinism::Deterministic,
+			// let result =
+			// pallet_contracts::Pallet::<T>::bare_call(
+			// 	who,
+			// 	token.clone(),
+			// 	contracts_value,
+			// 	gas_limit,
+			// 	None,
+			// 	data,
+			// 	false,
+			// 	pallet_contracts::Determinism::Deterministic,
+			// );
+
+			// <T as pallet::Config>::Currency::ensure_can_withdraw(
+			// 	&who,
+			// 	&token_amount,
+			// 	WithdrawReason::Transfer.into(),
+			// 	<T as frame_system::Config>::AccountId::default(),
+			// );
+		
+			let transfer_result = <T as pallet::Config>::Currency::transfer(
+				&who,
+				&T::pallet_account(),
+				token_amount,
+				ExistenceRequirement::AllowDeath,
 			);
-			log::info!("result: {:?}", result.result);
 
-			if let Ok(contract_result) = result.result {
-				let data = contract_result.data;
-				let total_supply = BalanceOf::<T>::decode(&mut data.as_slice()).unwrap_or_default();
-				Self::deposit_event(Event::TotalSupply(dest, total_supply));
-				Ok(().into())
-			} else {
-				Ok(().into())
+			if transfer_result.is_err() {
+				// handle error
+				Err("Token transfer failed")?
 			}
+
+			// token transfer was successful, do something
+			Ok(().into())
+
+			// if let Ok(contract_result) = result.result {
+			// 	let data = contract_result.data;
+			// 	let total_supply = BalanceOf::<T>::decode(&mut data.as_slice()).unwrap_or_default();
+			// 	Self::deposit_event(Event::TotalSupply(token.clone(), total_supply));
+			// 	Ok(().into())
+			// } else {
+			// 	Ok(().into())
+			// }
 		}
-		
 	}
 
 	impl<T: Config> Pallet<T> {
