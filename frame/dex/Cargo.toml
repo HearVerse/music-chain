@@ -26,6 +26,7 @@ pallet-assets = {default-features = false, version = "4.0.0-dev", path = "../ass
 pallet-balances = {default-features = false, version = "4.0.0-dev", path = "../balances" }
 pallet-contracts = {default-features = false, version = "4.0.0-dev", path = "../contracts" }
 log = { version = "0.4.17", default-features = false }
+sp-core = { default-features = false, features = ["full_crypto"], git = "https://github.com/paritytech/substrate.git", tag = "monthly-2021-09", version = "4.0.0-dev" }
 
 # third party
 hex-literal = "0.3.4"

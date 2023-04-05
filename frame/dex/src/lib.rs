@@ -328,23 +328,24 @@ pub mod pallet {
 			// let contract_info = pallet_contracts::Pallet::<T>::get_contract_info(&dest);
 			// ensure!(contract_info.is_some(), "Contract not found");
 			let mut encoded = MultiAddress::<AccountIdOf<T>, u32>::Id(token.clone()).encode();
+			log::info!("data: {:?} encode", T::pallet_account().encode());
 
 			let mut data = Vec::new();
 			data.append(&mut selector.clone());
 			data.append(&mut token_amount.encode());
 			data.append(&mut encoded);
 
-			// let result =
-			// pallet_contracts::Pallet::<T>::bare_call(
-			// 	who,
-			// 	token.clone(),
-			// 	contracts_value,
-			// 	gas_limit,
-			// 	None,
-			// 	data,
-			// 	false,
-			// 	pallet_contracts::Determinism::Deterministic,
-			// );
+			let result = 
+			pallet_contracts::Pallet::<T>::bare_call(
+				who,
+				token.clone(),
+				contracts_value,
+				gas_limit,
+				None,
+				data,
+				false,
+				pallet_contracts::Determinism::Deterministic,
+			);
 
 			// <T as pallet::Config>::Currency::ensure_can_withdraw(
 			// 	&who,
@@ -352,30 +353,31 @@ pub mod pallet {
 			// 	WithdrawReason::Transfer.into(),
 			// 	<T as frame_system::Config>::AccountId::default(),
 			// );
-		
-			let transfer_result = <T as pallet::Config>::Currency::transfer(
-				&who,
-				&T::pallet_account(),
-				token_amount,
-				ExistenceRequirement::AllowDeath,
-			);
 
-			if transfer_result.is_err() {
-				// handle error
-				Err("Token transfer failed")?
-			}
+			// let transfer_result = <T as pallet::Config>::Currency::transfer(
+			// 	&who,
+			// 	&T::pallet_account(),
+			// 	token_amount,
+			// 	ExistenceRequirement::AllowDeath,
+			// );
+
+			// if transfer_result.is_err() {
+			// 	// handle error
+			// 	Err("Token transfer failed")?
+			// }
 
 			// token transfer was successful, do something
-			Ok(().into())
+			// Ok(().into())
 
-			// if let Ok(contract_result) = result.result {
-			// 	let data = contract_result.data;
-			// 	let total_supply = BalanceOf::<T>::decode(&mut data.as_slice()).unwrap_or_default();
-			// 	Self::deposit_event(Event::TotalSupply(token.clone(), total_supply));
-			// 	Ok(().into())
-			// } else {
-			// 	Ok(().into())
-			// }
+			if let Ok(contract_result) = result.result {
+				let data = contract_result.data;
+				log::info!("data: {:?}", data);
+				let total_supply = BalanceOf::<T>::decode(&mut data.as_slice()).unwrap_or_default();
+				Self::deposit_event(Event::TotalSupply(token.clone(), total_supply));
+				Ok(().into())
+			} else {
+				Ok(().into())
+			}
 		}
 	}
 
