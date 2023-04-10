@@ -26,6 +26,7 @@ use codec::{Decode, Encode, MaxEncodedLen};
 use frame_election_provider_support::{
 	onchain, BalancingConfig, ElectionDataProvider, SequentialPhragmen, VoteWeight,
 };
+use orml_tokens as tokens;
 use frame_support::{
 	construct_runtime,
 	dispatch::DispatchClass,
@@ -298,20 +299,20 @@ impl InstanceFilter<RuntimeCall> for ProxyType {
 			ProxyType::Any => true,
 			ProxyType::NonTransfer => !matches!(
 				c,
-				RuntimeCall::Balances(..)
-					| RuntimeCall::Assets(..)
-					| RuntimeCall::Uniques(..)
-					| RuntimeCall::Vesting(pallet_vesting::Call::vested_transfer { .. })
-					| RuntimeCall::Indices(pallet_indices::Call::transfer { .. })
+				RuntimeCall::Balances(..) |
+					RuntimeCall::Assets(..) |
+					RuntimeCall::Uniques(..) |
+					RuntimeCall::Vesting(pallet_vesting::Call::vested_transfer { .. }) |
+					RuntimeCall::Indices(pallet_indices::Call::transfer { .. })
 			),
 			ProxyType::Governance => matches!(
 				c,
-				RuntimeCall::Democracy(..)
-					| RuntimeCall::Council(..)
-					| RuntimeCall::Society(..)
-					| RuntimeCall::TechnicalCommittee(..)
-					| RuntimeCall::Elections(..)
-					| RuntimeCall::Treasury(..)
+				RuntimeCall::Democracy(..) |
+					RuntimeCall::Council(..) |
+					RuntimeCall::Society(..) |
+					RuntimeCall::TechnicalCommittee(..) |
+					RuntimeCall::Elections(..) |
+					RuntimeCall::Treasury(..)
 			),
 			ProxyType::Staking => matches!(c, RuntimeCall::Staking(..)),
 		}
@@ -668,8 +669,8 @@ impl Get<Option<BalancingConfig>> for OffchainRandomBalancing {
 			max => {
 				let seed = sp_io::offchain::random_seed();
 				let random = <u32>::decode(&mut TrailingZeroInput::new(&seed))
-					.expect("input is padded with zeroes; qed")
-					% max.saturating_add(1);
+					.expect("input is padded with zeroes; qed") %
+					max.saturating_add(1);
 				random as usize
 			},
 		};
@@ -1679,10 +1680,12 @@ parameter_types! {
 	pub const DexPalletId: PalletId = PalletId(*b"dex_mock");
 }
 
+
 impl pallet_dex::Config for Runtime {
 	type PalletId = DexPalletId;
 	type RuntimeEvent = RuntimeEvent;
-	type Currency = Balances;
+    type Currency: Currency<Self::AccountId>;
+	type Tokens = Tokens;
 	type AssetBalance = AssetBalance;
 	type AssetToCurrencyBalance = sp_runtime::traits::Identity;
 	type CurrencyToAssetBalance = sp_runtime::traits::Identity;
@@ -1695,6 +1698,23 @@ impl pallet_dex::Config for Runtime {
 	type ProviderFeeDenominator = ConstU128<1000>;
 	type MinDeposit = ConstU128<1>;
 }
+
+// parameter_type_with_key! {
+// 	pub ExistentialDeposits: |_currency_id: Currency<Self::AccountId>| -> Balance {
+// 		Default::default()
+// 	};
+// }
+
+// impl orml_tokens::Config for Runtime {
+// 	type Event = Event;
+// 	type Balance = Balance;
+// 	type Amount = Amount;
+// 	type CurrencyId = Currency<Self::AccountId>;
+// 	type WeightInfo = ();
+// 	type ExistentialDeposits = ExistentialDeposits;
+// 	type OnDust = ();
+// }
+
 
 construct_runtime!(
 	pub enum Runtime where
@@ -1763,6 +1783,8 @@ construct_runtime!(
 		MessageQueue: pallet_message_queue,
 		Pov: frame_benchmarking_pallet_pov,
 		DEX: pallet_dex,
+		Tokens: tokens::{Module, Storage, Event<T>, Config<T>},
+
 
 	}
 );

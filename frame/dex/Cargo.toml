@@ -9,43 +9,40 @@ license = "Unlicense"
 publish = false
 repository = "https://github.com/substrate-developer-hub/substrate-node-template/"
 
-
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
-codec = { package = "parity-scale-codec", version = "3.2.2", default-features = false }
+codec = { package = "parity-scale-codec", version = "3.2.2", default-features = false, features = ["derive"] }
 scale-info = { version = "2.1.1", default-features = false, features = ["derive"] }
-frame-benchmarking = { version = "4.0.0-dev", default-features = false, optional = true, path = "../benchmarking" }
 frame-support = { version = "4.0.0-dev", default-features = false, path = "../support" }
 frame-system = { version = "4.0.0-dev", default-features = false, path = "../system" }
 sp-io = { version = "7.0.0", default-features = false, path = "../../primitives/io" }
 sp-runtime = { version = "7.0.0", default-features = false, path = "../../primitives/runtime" }
 sp-std = { version = "5.0.0", default-features = false, path = "../../primitives/std" }
-pallet-assets = {default-features = false, version = "4.0.0-dev", path = "../assets" }
-pallet-balances = {default-features = false, version = "4.0.0-dev", path = "../balances" }
-pallet-contracts = {default-features = false, version = "4.0.0-dev", path = "../contracts" }
-log = { version = "0.4.17", default-features = false }
-sp-core = { default-features = false, features = ["full_crypto"], git = "https://github.com/paritytech/substrate.git", tag = "monthly-2021-09", version = "4.0.0-dev" }
-orml-traits = { default-features = false }
-# third party
-hex-literal = "0.3.4"
+
+# [dependencies.orml-tokens]
+# default-features = false
+# git = "https://github.com/open-web3-stack/open-runtime-module-library.git"
+# tag = "0.4.0"
+orml-tokens = { git = "https://github.com/open-web3-stack/open-runtime-module-library.git", branch = "master", default-features = false }
+orml-traits = { git = "https://github.com/open-web3-stack/open-runtime-module-library.git", branch = "master", default-features = false }
+
+[dev-dependencies]
+pallet-balances = { version = "4.0.0-dev", path = "../balances" }
+sp-core = { version = "7.0.0", path = "../../primitives/core" }
+
 [features]
 default = ["std"]
 std = [
-	"frame-benchmarking?/std",
 	"codec/std",
 	"frame-support/std",
 	"frame-system/std",
 	"scale-info/std",
 	"sp-io/std",
+	"orml-tokens/std",
 	"orml-traits/std",
 	"sp-runtime/std",
 	"sp-std/std",
-]
-runtime-benchmarks = [
-	"frame-benchmarking/runtime-benchmarks",
-	"frame-support/runtime-benchmarks",
-	"frame-system/runtime-benchmarks",
 ]
 try-runtime = ["frame-support/try-runtime"]
