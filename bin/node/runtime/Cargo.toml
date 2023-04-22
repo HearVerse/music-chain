@@ -112,14 +112,6 @@ pallet-uniques = { version = "4.0.0-dev", default-features = false, path = "../.
 pallet-vesting = { version = "4.0.0-dev", default-features = false, path = "../../../frame/vesting" }
 pallet-whitelist = { version = "4.0.0-dev", default-features = false, path = "../../../frame/whitelist" }
 pallet-dex = { version = "0.0.1", default-features = false, path = "../../../frame/dex" }
-orml-tokens = { git = "https://github.com/open-web3-stack/open-runtime-module-library.git", branch = "master", default-features = false }
-orml-traits = { git = "https://github.com/open-web3-stack/open-runtime-module-library.git", branch = "master", default-features = false }
-orml-currencies = { git = "https://github.com/open-web3-stack/open-runtime-module-library.git", branch = "master", default-features = false }
-orml-oracle = { git = "https://github.com/open-web3-stack/open-runtime-module-library.git", branch = "master", default-features = false }
-orml-oracle-rpc-runtime-api = { git = "https://github.com/open-web3-stack/open-runtime-module-library.git", branch = "master", default-features = false}
-orml-rewards = { git = "https://github.com/open-web3-stack/open-runtime-module-library.git", branch = "master", default-features = false}
-orml-utilities = {git = "https://github.com/open-web3-stack/open-runtime-module-library.git", branch = "master", default-features = false}
-orml-benchmarking = { git = "https://github.com/open-web3-stack/open-runtime-module-library.git", branch = "master", default-features = false }
 
 [build-dependencies]
 substrate-wasm-builder = { version = "5.0.0-dev", path = "../../../utils/wasm-builder", optional = true }
@@ -128,14 +120,6 @@ substrate-wasm-builder = { version = "5.0.0-dev", path = "../../../utils/wasm-bu
 default = ["std"]
 with-tracing = ["frame-executive/with-tracing"]
 std = [
-	'orml-tokens/std',
-    'orml-traits/std',
-    'orml-currencies/std',
-    'orml-rewards/std',
-    'orml-oracle/std',
-    "orml-oracle-rpc-runtime-api/std",
-    "orml-benchmarking/std",
-    "orml-utilities/std",
 	"pallet-whitelist/std",
 	"pallet-offences-benchmarking?/std",
 	"pallet-election-provider-support-benchmarking?/std",

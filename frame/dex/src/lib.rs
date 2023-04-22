@@ -1,66 +1,59 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
-pub use pallet::*;
-
-#[cfg(test)]
-mod mock;
-
-#[cfg(test)]
-mod tests;
-
-#[cfg(feature = "runtime-benchmarks")]
-mod benchmarking;
 pub mod weights;
 
-use frame_support::traits::Currency;
-use sp_std::prelude::*;
-// use orml_tokens:kcsz:Pallet as TokensPallet;
-use orml_traits::{MultiCurrency, MultiCurrencyExtended};
-
+use frame_support::{traits::Currency, Parameter};
 pub use pallet::*;
+use sp_runtime::{traits::AccountIdConversion, MultiAddress};
+use sp_std::prelude::*;
 pub use weights::WeightInfo;
+// use pallet_contracts::ExecReturnValue;
+use scale_info::prelude::string::String;
+use pallet_contracts_primitives::{ExecReturnValue, ReturnFlags};
 
 type AccountIdOf<T> = <T as frame_system::Config>::AccountId;
 type BalanceOf<T> = <<T as Config>::Currency as Currency<AccountIdOf<T>>>::Balance;
 type AssetIdOf<T> = <T as Config>::AssetId;
 type AssetBalanceOf<T> = <T as Config>::AssetBalance;
+type ContractsBalanceOf<T> =
+	<<T as pallet_contracts::Config>::Currency as frame_support::traits::Currency<
+		<T as frame_system::Config>::AccountId,
+	>>::Balance;
 
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
 	use codec::EncodeLike;
 	use frame_support::{
+		inherent::Vec,
 		pallet_prelude::*,
 		sp_runtime::{
 			traits::{
-				AccountIdConversion, CheckedAdd, CheckedMul, CheckedSub, Convert, One, Saturating,
-				Zero,
+				AccountIdConversion, AtLeast32BitUnsigned, CheckedAdd, CheckedMul, CheckedSub,
+				Convert, Member, One, Saturating, Zero,
 			},
-			FixedPointNumber, FixedPointOperand, FixedU128,
+			DispatchResult, FixedPointNumber, FixedPointOperand, FixedU128,
 		},
 		traits::{
 			fungibles::{Create, Destroy, Inspect, Mutate, Transfer},
-			tokens::{Balance, WithdrawConsequence},
-			ExistenceRequirement,
+			tokens::{AssetId, Balance, WithdrawConsequence},
+			ExistenceRequirement, WithdrawReasons,
 		},
 		transactional, PalletId,
 	};
-	use frame_system::pallet_prelude::*;
-	use sp_std::fmt::Debug;
 
-	#[pallet::pallet]
-	#[pallet::generate_store(pub(super) trait Store)]
-	pub struct Pallet<T>(_);
+	use frame_system::{pallet_prelude::*, Origin};
+	use sp_std::fmt::Debug;
+	pub const MAX_LENGTH: usize = 50;
 
 	#[pallet::config]
-	pub trait Config: frame_system::Config {
+	pub trait Config: frame_system::Config + TypeInfo + pallet_contracts::Config {
 		/// Pallet ID.
 		#[pallet::constant]
 		type PalletId: Get<PalletId>;
 
 		/// The overarching event type.
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
-		type Tokens: MultiCurrency<Self::AccountId>;
 
 		/// The currency trait.
 		type Currency: Currency<Self::AccountId>;
@@ -112,79 +105,264 @@ pub mod pallet {
 		type MinDeposit: Get<BalanceOf<Self>>;
 	}
 
-	// The pallet's runtime storage items.
-	// https://docs.substrate.io/main-docs/build/runtime-storage/
 	#[pallet::storage]
 	#[pallet::getter(fn something)]
-	// Learn more about declaring storage items:
-	// https://docs.substrate.io/main-docs/build/runtime-storage/#declaring-storage-items
 	pub type Something<T> = StorageValue<_, u32>;
 
-	// Pallets use events to inform users when important changes are made.
-	// https://docs.substrate.io/main-docs/build/events-errors/
 	#[pallet::event]
 	#[pallet::generate_deposit(pub(super) fn deposit_event)]
 	pub enum Event<T: Config> {
-		/// Event documentation should end with an array that provides descriptive names for event
-		/// parameters. [something, who]
-		SomethingStored { something: u32, who: T::AccountId },
+		/// A new exchange was created [asset_id, liquidity_token_id]
+		ExchangeCreated(AssetIdOf<T>, AssetIdOf<T>),
+		/// Liquidity was added to an exchange [provider_id, asset_id, currency_amount,
+		/// token_amount, liquidity_minted]
+		LiquidityAdded(
+			T::AccountId,
+			AssetIdOf<T>,
+			BalanceOf<T>,
+			AssetBalanceOf<T>,
+			AssetBalanceOf<T>,
+		),
+		/// Liquidity was removed from an exchange [provider_id, asset_id, currency_amount,
+		/// token_amount, liquidity_amount]
+		LiquidityRemoved(
+			T::AccountId,
+			AssetIdOf<T>,
+			BalanceOf<T>,
+			AssetBalanceOf<T>,
+			AssetBalanceOf<T>,
+		),
+		/// Currency was traded for an asset [asset_id, buyer_id, recipient_id, currency_amount,
+		/// token_amount]
+		CurrencyTradedForAsset(
+			AssetIdOf<T>,
+			T::AccountId,
+			T::AccountId,
+			BalanceOf<T>,
+			AssetBalanceOf<T>,
+		),
+		/// An asset was traded for currency [asset_id, buyer_id, recipient_id, currency_amount,
+		/// token_amount]
+		AssetTradedForCurrency(
+			AssetIdOf<T>,
+			T::AccountId,
+			T::AccountId,
+			BalanceOf<T>,
+			AssetBalanceOf<T>,
+		),
+		TokenTransferred(T::AccountId, T::AccountId, BalanceOf<T>),
+		/// Event to display when call is made from the extrinsic to a smart contract
+		CalledContractFromPallet(T::AccountId),
+		/// Event to display when call is made from a smart contract to the extrinsic
+		CalledPalletFromContract(u32),
+		TotalSupply(T::AccountId, BalanceOf<T>),
 	}
 
-	// Errors inform users that something went wrong.
 	#[pallet::error]
 	pub enum Error<T> {
-		/// Error names should be descriptive.
-		NoneValue,
-		/// Errors should have helpful documentation associated with them.
-		StorageOverflow,
+		/// Asset with the specified ID does not exist
+		AssetNotFound,
+		/// Exchange for the given asset already exists
+		ExchangeAlreadyExists,
+		/// Provided liquidity token ID is already taken
+		TokenIdTaken,
+		/// Not enough free balance to add liquidity or perform trade
+		BalanceTooLow,
+		/// Not enough tokens to add liquidity or perform trade
+		NotEnoughTokens,
+		/// Specified account doesn't own enough liquidity in the exchange
+		ProviderLiquidityTooLow,
+		/// No exchange found for the given `asset_id`
+		ExchangeNotFound,
+		/// Zero value provided for trade amount parameter
+		TradeAmountIsZero,
+		/// Zero value provided for `token_amount` parameter
+		TokenAmountIsZero,
+		/// Zero value provided for `max_tokens` parameter
+		MaxTokensIsZero,
+		/// Zero value provided for `currency_amount` parameter
+		CurrencyAmountIsZero,
+		/// Value provided for `currency_amount` parameter is too high
+		CurrencyAmountTooHigh,
+		/// Value provided for `currency_amount` parameter is too low
+		CurrencyAmountTooLow,
+		/// Zero value provided for `min_liquidity` parameter
+		MinLiquidityIsZero,
+		/// Value provided for `max_tokens` parameter is too low
+		MaxTokensTooLow,
+		/// Value provided for `min_liquidity` parameter is too high
+		MinLiquidityTooHigh,
+		/// Zero value provided for `liquidity_amount` parameter
+		LiquidityAmountIsZero,
+		/// Zero value provided for `min_currency` parameter
+		MinCurrencyIsZero,
+		/// Zero value provided for `min_tokens` parameter
+		MinTokensIsZero,
+		/// Value provided for `min_currency` parameter is too high
+		MinCurrencyTooHigh,
+		/// Value provided for `min_tokens` parameter is too high
+		MinTokensTooHigh,
+		/// Value provided for `max_currency` parameter is too low
+		MaxCurrencyTooLow,
+		/// Value provided for `min_bought_tokens` parameter is too high
+		MinBoughtTokensTooHigh,
+		/// Value provided for `max_sold_tokens` parameter is too low
+		MaxSoldTokensTooLow,
+		/// There is not enough liquidity in the exchange to perform trade
+		NotEnoughLiquidity,
+		/// Overflow occurred
+		Overflow,
+		/// Underflow occurred
+		Underflow,
+		/// Deadline specified for the operation has passed
+		DeadlinePassed,
+		InputTooLarge,
+		ContractNotFound,
+		TokenTransferFailed,
 	}
 
-	// Dispatchable functions allows users to interact with the pallet and invoke state changes.
-	// These functions materialize as "extrinsics", which are often compared to transactions.
-	// Dispatchable functions must be annotated with a weight and must return a DispatchResult.
-	#[pallet::call]
-	impl<T: Config> Pallet<T> {
-		/// An example dispatchable that takes a singles value as a parameter, writes the value to
-		/// storage and emits an event. This function must be dispatched by a signed extrinsic.
-		#[pallet::call_index(0)]
-		#[pallet::weight(10_000 + T::DbWeight::get().writes(1).ref_time())]
-		pub fn do_something(origin: OriginFor<T>, something: u32) -> DispatchResult {
-			// Check that the extrinsic was signed and get the signer.
-			// This function will return an error if the extrinsic is not signed.
-			// https://docs.substrate.io/main-docs/build/origins/
+	pub trait ConfigHelper: Config {
+		fn pallet_account() -> AccountIdOf<Self>;
+		fn currency_to_asset(curr_balance: BalanceOf<Self>) -> AssetBalanceOf<Self>;
+		fn asset_to_currency(asset_balance: AssetBalanceOf<Self>) -> BalanceOf<Self>;
+		fn net_amount_numerator() -> BalanceOf<Self>;
+	}
 
-			let who = ensure_signed(origin)?;
-
-			// T::Currency::transfer(&who, &T::PalletId::get().into_account(),
-			// T::MinDeposit::get(), ExistenceRequirement::KeepAlive)?;
-
-			// Update storage.
-			<Something<T>>::put(something);
-
-			// Emit an event.
-			Self::deposit_event(Event::SomethingStored { something, who });
-			// Return a successful DispatchResultWithPostInfo
-			Ok(())
+	impl<T: Config> ConfigHelper for T {
+		#[inline(always)]
+		fn pallet_account() -> AccountIdOf<Self> {
+			Self::PalletId::get().into_account_truncating()
 		}
 
-		/// An example dispatchable that may throw a custom error.
-		#[pallet::call_index(1)]
-		#[pallet::weight(10_000 + T::DbWeight::get().reads_writes(1,1).ref_time())]
-		pub fn cause_error(origin: OriginFor<T>) -> DispatchResult {
-			let _who = ensure_signed(origin)?;
+		#[inline(always)]
+		fn currency_to_asset(curr_balance: BalanceOf<Self>) -> AssetBalanceOf<Self> {
+			Self::CurrencyToAssetBalance::convert(curr_balance)
+		}
 
-			// Read a value from storage.
-			match <Something<T>>::get() {
-				// Return an error if the value has not been set.
-				None => return Err(Error::<T>::NoneValue.into()),
-				Some(old) => {
-					// Increment the value read from storage; will error in the event of overflow.
-					let new = old.checked_add(1).ok_or(Error::<T>::StorageOverflow)?;
-					// Update the value in storage with the incremented result.
-					<Something<T>>::put(new);
-					Ok(())
-				},
+		#[inline(always)]
+		fn asset_to_currency(asset_balance: AssetBalanceOf<Self>) -> BalanceOf<Self> {
+			Self::AssetToCurrencyBalance::convert(asset_balance)
+		}
+
+		#[inline(always)]
+		fn net_amount_numerator() -> BalanceOf<Self> {
+			Self::ProviderFeeDenominator::get()
+				.checked_sub(&Self::ProviderFeeNumerator::get())
+				.expect("Provider fee shouldn't be greater than 100%")
+		}
+	}
+
+	pub struct LiquidityPool<AssetId, Balance> {
+		pub asset0: Balance,
+		pub asset1: Balance,
+		pub shares: Balance,
+		pub asset0_id: AssetId,
+		pub asset1_id: AssetId,
+	}
+
+	#[derive(
+		Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, Default, MaxEncodedLen, TypeInfo,
+	)]
+	pub struct Exchange<AssetId, Balance, AssetBalance> {
+		pub asset_id: AssetId,
+		pub currency_reserve: Balance,
+		pub token_reserve: AssetBalance,
+		pub liquidity_token_id: AssetId,
+	}
+
+	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
+	#[codec(mel_bound())]
+	pub struct ContractToken {
+		pub contractAddress: Vec<u8>,
+	}
+	impl MaxEncodedLen for ContractToken {
+		fn max_encoded_len() -> usize {
+			100
+		}
+	}
+
+	type ExchangeOf<T> = Exchange<AssetIdOf<T>, BalanceOf<T>, AssetBalanceOf<T>>;
+
+	#[pallet::pallet]
+	#[pallet::generate_store(pub(super) trait Store)]
+	pub struct Pallet<T>(_);
+
+	#[pallet::storage]
+	#[pallet::getter(fn exchanges)]
+	pub(super) type Exchanges<T: Config> =
+		StorageMap<_, Twox64Concat, AssetIdOf<T>, ExchangeOf<T>, OptionQuery>;
+
+	#[pallet::storage]
+	#[pallet::getter(fn tokenContracts)]
+	pub(super) type ContractTokens<T: Config> =
+		StorageMap<_, Twox64Concat, T::AccountId, ContractToken, OptionQuery>;
+
+	#[pallet::call]
+	impl<T: Config> Pallet<T> {
+	
+	
+		#[pallet::call_index(9)]
+		#[pallet::weight(10_000)]
+		pub fn transfer_token(
+			origin: OriginFor<T>,
+			contract_address: T::AccountId,
+			to: T::AccountId,
+			amount: BalanceOf<T>,
+		) -> DispatchResult {
+			let sender = ensure_signed(origin)?;
+
+			let transfer = Self::transferTokenFromWoner(&sender, contract_address, to, amount);
+
+			match transfer {
+				Ok(()) => Ok(().into()),
+				Err(e) => Err(e),
 			}
+		}
+	}
+
+	impl<T: Config> Pallet<T> {
+		pub fn transferTokenFromWoner(
+			origin: &T::AccountId,
+			contract_address: T::AccountId,
+			to: T::AccountId,
+			amount: BalanceOf<T>,
+		) -> DispatchResult {
+			let method_id: [u8; 4] = [0x84, 0xa1, 0x5d, 0xa1];
+
+			let gas_limit: Weight = T::BlockWeights::get().max_block;
+
+			let contracts_value: ContractsBalanceOf<T> =
+				<T as pallet_contracts::Config>::Currency::free_balance(&contract_address);
+
+			let mut data = method_id.to_vec();
+			data.extend(to.encode());
+			data.extend(amount.encode());
+
+			let result = pallet_contracts::Pallet::<T>::bare_call(
+				origin.clone(),
+				contract_address.clone(),
+				contracts_value,
+				gas_limit,
+				None,
+				data,
+				false,
+				pallet_contracts::Determinism::Deterministic,
+			);
+			log::info!("result: {:?}", result.result);
+
+			if let Ok(contract_result) = result.result {
+				
+				// Check if the contract call was successful
+				if !contract_result.flags.contains(pallet_contracts_primitives::ReturnFlags::REVERT) {
+					Self::deposit_event(Event::TokenTransferred(contract_address, to, amount));
+					Ok(().into())
+				} else {
+					Err(Error::<T>::TokenTransferFailed)?
+				}
+			} else {
+				Err(Error::<T>::TokenTransferFailed)?
+			}
+			
 		}
 	}
 }

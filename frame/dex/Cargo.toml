@@ -13,21 +13,17 @@ repository = "https://github.com/substrate-developer-hub/substrate-node-template
 targets = ["x86_64-unknown-linux-gnu"]
 
 [dependencies]
-codec = { package = "parity-scale-codec", version = "3.2.2", default-features = false, features = ["derive"] }
+codec = { package = "parity-scale-codec", version = "3.2.2", default-features = false, features = ["derive", "full"] }
 scale-info = { version = "2.1.1", default-features = false, features = ["derive"] }
+sp-io = { version = "7.0.0", default-features = false, path = "../../primitives/io" }
+sp-std = { version = "5.0.0", default-features = false, path = "../../primitives/std" }
 frame-support = { version = "4.0.0-dev", default-features = false, path = "../support" }
 frame-system = { version = "4.0.0-dev", default-features = false, path = "../system" }
-sp-io = { version = "7.0.0", default-features = false, path = "../../primitives/io" }
 sp-runtime = { version = "7.0.0", default-features = false, path = "../../primitives/runtime" }
-sp-std = { version = "5.0.0", default-features = false, path = "../../primitives/std" }
-
-# [dependencies.orml-tokens]
-# default-features = false
-# git = "https://github.com/open-web3-stack/open-runtime-module-library.git"
-# tag = "0.4.0"
-orml-tokens = { git = "https://github.com/open-web3-stack/open-runtime-module-library.git", branch = "master", default-features = false }
-orml-traits = { git = "https://github.com/open-web3-stack/open-runtime-module-library.git", branch = "master", default-features = false }
-
+# orml-traits = { path="../../orlem/traits",version="0.4.1-dev",default-features = false }
+pallet-contracts = {default-features = false, version = "4.0.0-dev", path = "../contracts" }
+pallet-contracts-primitives={default-features = false, version = "7.0.0", path = "../contracts/primitives" }
+log = { version = "0.4.17", default-features = false }
 [dev-dependencies]
 pallet-balances = { version = "4.0.0-dev", path = "../balances" }
 sp-core = { version = "7.0.0", path = "../../primitives/core" }
@@ -40,8 +36,6 @@ std = [
 	"frame-system/std",
 	"scale-info/std",
 	"sp-io/std",
-	"orml-tokens/std",
-	"orml-traits/std",
 	"sp-runtime/std",
 	"sp-std/std",
 ]
