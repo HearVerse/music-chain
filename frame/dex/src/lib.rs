@@ -1,15 +1,14 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod weights;
-
 use frame_support::{traits::Currency, Parameter};
 pub use pallet::*;
 use sp_runtime::{traits::AccountIdConversion, MultiAddress};
 use sp_std::prelude::*;
 pub use weights::WeightInfo;
 // use pallet_contracts::ExecReturnValue;
-use scale_info::prelude::string::String;
 use pallet_contracts_primitives::{ExecReturnValue, ReturnFlags};
+use scale_info::prelude::string::String;
 
 type AccountIdOf<T> = <T as frame_system::Config>::AccountId;
 type BalanceOf<T> = <<T as Config>::Currency as Currency<AccountIdOf<T>>>::Balance;
@@ -252,36 +251,15 @@ pub mod pallet {
 		}
 	}
 
-	pub struct LiquidityPool<AssetId, Balance> {
-		pub asset0: Balance,
-		pub asset1: Balance,
-		pub shares: Balance,
-		pub asset0_id: AssetId,
-		pub asset1_id: AssetId,
+	#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, MaxEncodedLen, TypeInfo)]
+	pub struct Exchange<T: Config> {
+		pub asset_id: T::AccountId,
+		pub currency_reserve: BalanceOf<T>,
+		pub token_reserve: AssetBalanceOf<T>,
+		pub liquidity_token_id: T::AccountId,
 	}
 
-	#[derive(
-		Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, Default, MaxEncodedLen, TypeInfo,
-	)]
-	pub struct Exchange<AssetId, Balance, AssetBalance> {
-		pub asset_id: AssetId,
-		pub currency_reserve: Balance,
-		pub token_reserve: AssetBalance,
-		pub liquidity_token_id: AssetId,
-	}
-
-	#[derive(Clone, Encode, Decode, PartialEq, RuntimeDebug, TypeInfo)]
-	#[codec(mel_bound())]
-	pub struct ContractToken {
-		pub contractAddress: Vec<u8>,
-	}
-	impl MaxEncodedLen for ContractToken {
-		fn max_encoded_len() -> usize {
-			100
-		}
-	}
-
-	type ExchangeOf<T> = Exchange<AssetIdOf<T>, BalanceOf<T>, AssetBalanceOf<T>>;
+	type ExchangeOf<T> = Exchange<T>;
 
 	#[pallet::pallet]
 	#[pallet::generate_store(pub(super) trait Store)]
@@ -292,15 +270,64 @@ pub mod pallet {
 	pub(super) type Exchanges<T: Config> =
 		StorageMap<_, Twox64Concat, AssetIdOf<T>, ExchangeOf<T>, OptionQuery>;
 
-	#[pallet::storage]
-	#[pallet::getter(fn tokenContracts)]
-	pub(super) type ContractTokens<T: Config> =
-		StorageMap<_, Twox64Concat, T::AccountId, ContractToken, OptionQuery>;
-
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-	
-	
+
+		#[pallet::call_index(0)]
+		#[pallet::weight(<T as Config>::WeightInfo::create_exchange())]
+		#[transactional]
+		pub fn create_exchange(
+			origin: OriginFor<T>,
+			asset_id: T::AccountId,
+			liquidity_token_id: T::AccountId,
+			currency_amount: BalanceOf<T>,
+			token_amount: BalanceOf<T>,
+		) -> DispatchResult {
+			// -------------------------- Validation part --------------------------
+			let caller = ensure_signed(origin)?;
+			ensure!(currency_amount >= T::MinDeposit::get(), Error::<T>::CurrencyAmountTooLow);
+			ensure!(token_amount > Zero::zero(), Error::<T>::TokenAmountIsZero);
+
+			// if T::Assets::total_issuance(asset_id.clone()).is_zero() {
+			// 	Err(Error::<T>::AssetNotFound)?
+			// }
+
+			// if <Exchanges<T>>::contains_key(asset_id.clone()) {
+			// 	Err(Error::<T>::ExchangeAlreadyExists)?
+			// }
+
+			// ----------------------- Create liquidity token ----------------------
+			// T::AssetRegistry::create(
+			// 	liquidity_token_id.clone(),
+			// 	T::pallet_account(),
+			// 	false,
+			// 	<AssetBalanceOf<T>>::one(),
+			// )
+			// .map_err(|_| Error::<T>::TokenIdTaken)?;
+
+			// -------------------------- Update storage ---------------------------
+			let exchange = Exchange {
+				asset_id: asset_id.clone(),
+				currency_reserve: <BalanceOf<T>>::zero(),
+				token_reserve: <AssetBalanceOf<T>>::zero(),
+				liquidity_token_id: liquidity_token_id.clone(),
+			};
+
+			let liquidity_minted = T::currency_to_asset(currency_amount);
+			
+			Self::do_add_liquidity(
+				exchange,
+				currency_amount,
+				token_amount,
+				liquidity_minted,
+				caller,
+			)?;
+
+			// ---------------------------- Emit event -----------------------------
+			// Self::deposit_event(Event::ExchangeCreated(asset_id, liquidity_token_id));
+			Ok(())
+		}
+
 		#[pallet::call_index(9)]
 		#[pallet::weight(10_000)]
 		pub fn transfer_token(
@@ -311,7 +338,7 @@ pub mod pallet {
 		) -> DispatchResult {
 			let sender = ensure_signed(origin)?;
 
-			let transfer = Self::transferTokenFromWoner(&sender, contract_address, to, amount);
+			let transfer = Self::transfer_token_from_owner(&sender, contract_address, to, amount);
 
 			match transfer {
 				Ok(()) => Ok(().into()),
@@ -321,7 +348,7 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
-		pub fn transferTokenFromWoner(
+		pub fn transfer_token_from_owner(
 			origin: &T::AccountId,
 			contract_address: T::AccountId,
 			to: T::AccountId,
@@ -351,9 +378,9 @@ pub mod pallet {
 			log::info!("result: {:?}", result.result);
 
 			if let Ok(contract_result) = result.result {
-				
 				// Check if the contract call was successful
-				if !contract_result.flags.contains(pallet_contracts_primitives::ReturnFlags::REVERT) {
+				if !contract_result.flags.contains(pallet_contracts_primitives::ReturnFlags::REVERT)
+				{
 					Self::deposit_event(Event::TokenTransferred(contract_address, to, amount));
 					Ok(().into())
 				} else {
@@ -362,7 +389,48 @@ pub mod pallet {
 			} else {
 				Err(Error::<T>::TokenTransferFailed)?
 			}
-			
+		}
+
+		#[transactional]
+		fn do_add_liquidity(
+			mut exchange: ExchangeOf<T>,
+			currency_amount: BalanceOf<T>,
+			token_amount: BalanceOf<T>,
+			liquidity_minted: AssetBalanceOf<T>,
+			provider: AccountIdOf<T>,
+		) -> DispatchResult {
+			// --------------------- Currency & token transfer ---------------------
+
+			let asset_id = exchange.asset_id;
+			let pallet_account = T::pallet_account();
+
+			// <T as pallet::Config>::Currency::transfer(
+			// 	&provider,
+			// 	&pallet_account,
+			// 	currency_amount,
+			// 	ExistenceRequirement::KeepAlive,
+			// )?;
+			// T::Assets::transfer(asset_id.clone(), &provider, &pallet_account, token_amount,
+			// true)?; T::AssetRegistry::mint_into(
+			// 	exchange.liquidity_token_id.clone(),
+			// 	&provider,
+			// 	liquidity_minted,
+			// )?;
+
+			// -------------------------- Balances update --------------------------
+			// exchange.currency_reserve.saturating_accrue(currency_amount);
+			// exchange.token_reserve.saturating_accrue(token_amount);
+			// <Exchanges<T>>::insert(asset_id.clone(), exchange);
+
+			// ---------------------------- Emit event -----------------------------
+			// Self::deposit_event(Event::LiquidityAdded(
+			// 	provider,
+			// 	asset_id,
+			// 	currency_amount,
+			// 	token_amount,
+			// 	liquidity_minted,
+			// ));
+			Ok(())
 		}
 	}
 }
