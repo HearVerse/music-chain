@@ -288,23 +288,6 @@ pub mod pallet {
 			ensure!(currency_amount >= T::MinDeposit::get(), Error::<T>::CurrencyAmountTooLow);
 			ensure!(token_amount > Zero::zero(), Error::<T>::TokenAmountIsZero);
 
-			// if T::Assets::total_issuance(asset_id.clone()).is_zero() {
-			// 	Err(Error::<T>::AssetNotFound)?
-			// }
-
-			// if <Exchanges<T>>::contains_key(asset_id.clone()) {
-			// 	Err(Error::<T>::ExchangeAlreadyExists)?
-			// }
-
-			// ----------------------- Create liquidity token ----------------------
-			// T::AssetRegistry::create(
-			// 	liquidity_token_id.clone(),
-			// 	T::pallet_account(),
-			// 	false,
-			// 	<AssetBalanceOf<T>>::one(),
-			// )
-			// .map_err(|_| Error::<T>::TokenIdTaken)?;
-
 			// -------------------------- Update storage ---------------------------
 			let exchange = Exchange {
 				asset_id: asset_id.clone(),
@@ -399,19 +382,23 @@ pub mod pallet {
 			liquidity_minted: AssetBalanceOf<T>,
 			provider: AccountIdOf<T>,
 		) -> DispatchResult {
+
 			// --------------------- Currency & token transfer ---------------------
 
 			let asset_id = exchange.asset_id;
 			let pallet_account = T::pallet_account();
-
+			log::info!("result: {:?}", pallet_account);
 			// <T as pallet::Config>::Currency::transfer(
 			// 	&provider,
 			// 	&pallet_account,
 			// 	currency_amount,
 			// 	ExistenceRequirement::KeepAlive,
 			// )?;
+
 			// T::Assets::transfer(asset_id.clone(), &provider, &pallet_account, token_amount,
-			// true)?; T::AssetRegistry::mint_into(
+			// true)?; 
+			
+			// T::AssetRegistry::mint_into(
 			// 	exchange.liquidity_token_id.clone(),
 			// 	&provider,
 			// 	liquidity_minted,
