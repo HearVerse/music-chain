@@ -272,14 +272,13 @@ pub mod pallet {
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-
 		#[pallet::call_index(0)]
 		#[pallet::weight(<T as Config>::WeightInfo::create_exchange())]
 		#[transactional]
 		pub fn create_exchange(
 			origin: OriginFor<T>,
-			asset_id: T::AccountId,
-			liquidity_token_id: T::AccountId,
+			asset_id:  AccountIdOf<T>,,
+			liquidity_token_id:  AccountIdOf<T>,,
 			currency_amount: BalanceOf<T>,
 			token_amount: BalanceOf<T>,
 		) -> DispatchResult {
@@ -297,7 +296,8 @@ pub mod pallet {
 			};
 
 			let liquidity_minted = T::currency_to_asset(currency_amount);
-			
+			log::info!("liquidity_minted: {:?}", liquidity_minted);
+
 			Self::do_add_liquidity(
 				exchange,
 				currency_amount,
@@ -310,31 +310,14 @@ pub mod pallet {
 			// Self::deposit_event(Event::ExchangeCreated(asset_id, liquidity_token_id));
 			Ok(())
 		}
-
-		#[pallet::call_index(9)]
-		#[pallet::weight(10_000)]
-		pub fn transfer_token(
-			origin: OriginFor<T>,
-			contract_address: T::AccountId,
-			to: T::AccountId,
-			amount: BalanceOf<T>,
-		) -> DispatchResult {
-			let sender = ensure_signed(origin)?;
-
-			let transfer = Self::transfer_token_from_owner(&sender, contract_address, to, amount);
-
-			match transfer {
-				Ok(()) => Ok(().into()),
-				Err(e) => Err(e),
-			}
-		}
 	}
 
 	impl<T: Config> Pallet<T> {
+
 		pub fn transfer_token_from_owner(
-			origin: &T::AccountId,
-			contract_address: T::AccountId,
-			to: T::AccountId,
+			origin: &AccountIdOf<T>,,
+			contract_address:  AccountIdOf<T>,,
+			to:  AccountIdOf<T>,,
 			amount: BalanceOf<T>,
 		) -> DispatchResult {
 			let method_id: [u8; 4] = [0x84, 0xa1, 0x5d, 0xa1];
@@ -382,12 +365,18 @@ pub mod pallet {
 			liquidity_minted: AssetBalanceOf<T>,
 			provider: AccountIdOf<T>,
 		) -> DispatchResult {
-
 			// --------------------- Currency & token transfer ---------------------
 
 			let asset_id = exchange.asset_id;
 			let pallet_account = T::pallet_account();
 			log::info!("result: {:?}", pallet_account);
+			let transferToken =
+				Self::transfer_token_from_owner(&provider, asset_id, pallet_account, token_amount);
+
+			match transferToken {
+				Ok(()) => Ok(()),
+				Err(e) => Err(e),
+			};
 			// <T as pallet::Config>::Currency::transfer(
 			// 	&provider,
 			// 	&pallet_account,
@@ -396,8 +385,8 @@ pub mod pallet {
 			// )?;
 
 			// T::Assets::transfer(asset_id.clone(), &provider, &pallet_account, token_amount,
-			// true)?; 
-			
+			// true)?;
+
 			// T::AssetRegistry::mint_into(
 			// 	exchange.liquidity_token_id.clone(),
 			// 	&provider,
