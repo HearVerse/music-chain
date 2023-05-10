@@ -116,10 +116,10 @@ pub mod pallet {
 		/// Liquidity was added to an exchange [provider_id, asset_id, currency_amount,
 		/// token_amount, liquidity_minted]
 		LiquidityAdded(
-			T::AccountId,
-			AssetIdOf<T>,
+			AccountIdOf<T>,
+			AccountIdOf<T>,
 			BalanceOf<T>,
-			AssetBalanceOf<T>,
+			BalanceOf<T>,
 			AssetBalanceOf<T>,
 		),
 		/// Liquidity was removed from an exchange [provider_id, asset_id, currency_amount,
@@ -255,7 +255,7 @@ pub mod pallet {
 	pub struct Exchange<T: Config> {
 		pub asset_id: T::AccountId,
 		pub currency_reserve: BalanceOf<T>,
-		pub token_reserve: AssetBalanceOf<T>,
+		pub token_reserve: BalanceOf<T>,
 		pub liquidity_token_id: T::AccountId,
 	}
 
@@ -268,7 +268,7 @@ pub mod pallet {
 	#[pallet::storage]
 	#[pallet::getter(fn exchanges)]
 	pub(super) type Exchanges<T: Config> =
-		StorageMap<_, Twox64Concat, AssetIdOf<T>, ExchangeOf<T>, OptionQuery>;
+		StorageMap<_, Twox64Concat, AccountIdOf<T>, ExchangeOf<T>, OptionQuery>;
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
@@ -277,8 +277,8 @@ pub mod pallet {
 		#[transactional]
 		pub fn create_exchange(
 			origin: OriginFor<T>,
-			asset_id:  AccountIdOf<T>,,
-			liquidity_token_id:  AccountIdOf<T>,,
+			asset_id: AccountIdOf<T>,
+			liquidity_token_id: AccountIdOf<T>,
 			currency_amount: BalanceOf<T>,
 			token_amount: BalanceOf<T>,
 		) -> DispatchResult {
@@ -291,7 +291,7 @@ pub mod pallet {
 			let exchange = Exchange {
 				asset_id: asset_id.clone(),
 				currency_reserve: <BalanceOf<T>>::zero(),
-				token_reserve: <AssetBalanceOf<T>>::zero(),
+				token_reserve: <BalanceOf<T>>::zero(),
 				liquidity_token_id: liquidity_token_id.clone(),
 			};
 
@@ -313,11 +313,10 @@ pub mod pallet {
 	}
 
 	impl<T: Config> Pallet<T> {
-
 		pub fn transfer_token_from_owner(
-			origin: &AccountIdOf<T>,,
-			contract_address:  AccountIdOf<T>,,
-			to:  AccountIdOf<T>,,
+			origin: &AccountIdOf<T>,
+			contract_address: AccountIdOf<T>,
+			to: AccountIdOf<T>,
 			amount: BalanceOf<T>,
 		) -> DispatchResult {
 			let method_id: [u8; 4] = [0x84, 0xa1, 0x5d, 0xa1];
@@ -367,45 +366,30 @@ pub mod pallet {
 		) -> DispatchResult {
 			// --------------------- Currency & token transfer ---------------------
 
-			let asset_id = exchange.asset_id;
+			let asset_id = exchange.asset_id.clone(); // Clone asset_id
+			let liquidity_token_id = exchange.liquidity_token_id.clone(); // Clone liquidity_token_id
+		
+
 			let pallet_account = T::pallet_account();
 			log::info!("result: {:?}", pallet_account);
-			let transferToken =
-				Self::transfer_token_from_owner(&provider, asset_id, pallet_account, token_amount);
 
-			match transferToken {
-				Ok(()) => Ok(()),
-				Err(e) => Err(e),
-			};
-			// <T as pallet::Config>::Currency::transfer(
-			// 	&provider,
-			// 	&pallet_account,
-			// 	currency_amount,
-			// 	ExistenceRequirement::KeepAlive,
-			// )?;
-
-			// T::Assets::transfer(asset_id.clone(), &provider, &pallet_account, token_amount,
-			// true)?;
-
-			// T::AssetRegistry::mint_into(
-			// 	exchange.liquidity_token_id.clone(),
-			// 	&provider,
-			// 	liquidity_minted,
-			// )?;
+			Self::transfer_token_from_owner(&provider, liquidity_token_id, pallet_account.clone(), token_amount);
+			Self::transfer_token_from_owner(&provider, asset_id.clone(), pallet_account.clone(), token_amount);
 
 			// -------------------------- Balances update --------------------------
-			// exchange.currency_reserve.saturating_accrue(currency_amount);
-			// exchange.token_reserve.saturating_accrue(token_amount);
-			// <Exchanges<T>>::insert(asset_id.clone(), exchange);
+			
+			exchange.currency_reserve.saturating_accrue(currency_amount);
+			exchange.token_reserve.saturating_accrue(token_amount);
+			<Exchanges<T>>::insert(asset_id.clone(), exchange);
 
 			// ---------------------------- Emit event -----------------------------
-			// Self::deposit_event(Event::LiquidityAdded(
-			// 	provider,
-			// 	asset_id,
-			// 	currency_amount,
-			// 	token_amount,
-			// 	liquidity_minted,
-			// ));
+			Self::deposit_event(Event::LiquidityAdded(
+				provider,
+				asset_id,
+				currency_amount,
+				token_amount,
+				liquidity_minted,
+			));
 			Ok(())
 		}
 	}
