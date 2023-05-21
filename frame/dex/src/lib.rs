@@ -33,6 +33,7 @@ pub mod pallet {
 			},
 			DispatchResult, FixedPointNumber, FixedPointOperand, FixedU128,
 		},
+		storage::transactional,
 		traits::{
 			fungibles::{Create, Destroy, Inspect, Mutate, Transfer},
 			tokens::{AssetId, Balance, WithdrawConsequence},
@@ -41,7 +42,7 @@ pub mod pallet {
 		transactional, PalletId,
 	};
 
-	use frame_system::{pallet_prelude::*, Origin};
+	use frame_system::{ensure_signed, pallet_prelude::*, Origin};
 	use sp_std::fmt::Debug;
 	pub const MAX_LENGTH: usize = 50;
 
@@ -149,6 +150,8 @@ pub mod pallet {
 			BalanceOf<T>,
 			AssetBalanceOf<T>,
 		),
+		AssetToAssetPriceCalculated(AccountIdOf<T>, BalanceOf<T>, BalanceOf<T>),
+
 		TokenTransferred(T::AccountId, T::AccountId, BalanceOf<T>),
 		/// Event to display when call is made from the extrinsic to a smart contract
 		CalledContractFromPallet(T::AccountId),
@@ -163,6 +166,8 @@ pub mod pallet {
 		AssetNotFound,
 		/// Exchange for the given asset already exists
 		ExchangeAlreadyExists,
+		InsufficientOutputAmount,
+		ExchangeDoesNotExist,
 		/// Provided liquidity token ID is already taken
 		TokenIdTaken,
 		/// Not enough free balance to add liquidity or perform trade
@@ -177,6 +182,7 @@ pub mod pallet {
 		TradeAmountIsZero,
 		/// Zero value provided for `token_amount` parameter
 		TokenAmountIsZero,
+		ZeroReserve,
 		/// Zero value provided for `max_tokens` parameter
 		MaxTokensIsZero,
 		/// Zero value provided for `currency_amount` parameter
@@ -209,6 +215,7 @@ pub mod pallet {
 		MaxSoldTokensTooLow,
 		/// There is not enough liquidity in the exchange to perform trade
 		NotEnoughLiquidity,
+		UnableToFetchTotalLiquidity,
 		/// Overflow occurred
 		Overflow,
 		/// Underflow occurred
@@ -253,10 +260,18 @@ pub mod pallet {
 
 	#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, MaxEncodedLen, TypeInfo)]
 	pub struct Exchange<T: Config> {
-		pub asset_id: T::AccountId,
-		pub currency_reserve: BalanceOf<T>,
-		pub token_reserve: BalanceOf<T>,
-		pub liquidity_token_id: T::AccountId,
+		pub token_a: T::AccountId,
+		pub token_a_reserve: BalanceOf<T>,
+		pub token_b_reserve: BalanceOf<T>,
+		pub token_b: T::AccountId,
+		pub fee_numerator: BalanceOf<T>,
+		pub fee_denominator: BalanceOf<T>,
+	}
+
+	#[derive(Clone, Encode, Decode, Eq, PartialEq, RuntimeDebug, MaxEncodedLen, TypeInfo)]
+	pub enum TradeAmount<InputBalance, OutputBalance> {
+		FixedInput { input_amount: InputBalance, min_output: OutputBalance },
+		FixedOutput { max_input: InputBalance, output_amount: OutputBalance },
 	}
 
 	type ExchangeOf<T> = Exchange<T>;
@@ -268,7 +283,7 @@ pub mod pallet {
 	#[pallet::storage]
 	#[pallet::getter(fn exchanges)]
 	pub(super) type Exchanges<T: Config> =
-		StorageMap<_, Twox64Concat, AccountIdOf<T>, ExchangeOf<T>, OptionQuery>;
+		StorageMap<_, Twox64Concat, (AccountIdOf<T>, AccountIdOf<T>), Exchange<T>, OptionQuery>;
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
@@ -277,10 +292,12 @@ pub mod pallet {
 		#[transactional]
 		pub fn create_exchange(
 			origin: OriginFor<T>,
-			asset_id: AccountIdOf<T>,
-			liquidity_token_id: AccountIdOf<T>,
+			token_a: AccountIdOf<T>,
+			token_b: AccountIdOf<T>,
 			currency_amount: BalanceOf<T>,
 			token_amount: BalanceOf<T>,
+			fee_numerator: BalanceOf<T>,
+			fee_denominator: BalanceOf<T>,
 		) -> DispatchResult {
 			// -------------------------- Validation part --------------------------
 			let caller = ensure_signed(origin)?;
@@ -289,10 +306,12 @@ pub mod pallet {
 
 			// -------------------------- Update storage ---------------------------
 			let exchange = Exchange {
-				asset_id: asset_id.clone(),
-				currency_reserve: <BalanceOf<T>>::zero(),
-				token_reserve: <BalanceOf<T>>::zero(),
-				liquidity_token_id: liquidity_token_id.clone(),
+				token_a: token_a.clone(),
+				token_a_reserve: <BalanceOf<T>>::zero(),
+				token_b_reserve: <BalanceOf<T>>::zero(),
+				token_b: token_b.clone(),
+				fee_numerator,
+				fee_denominator,
 			};
 
 			let liquidity_minted = T::currency_to_asset(currency_amount);
@@ -310,9 +329,107 @@ pub mod pallet {
 			// Self::deposit_event(Event::ExchangeCreated(asset_id, liquidity_token_id));
 			Ok(())
 		}
+
+		#[pallet::call_index(1)]
+		#[pallet::weight(<T as Config>::WeightInfo::create_exchange())]
+		#[transactional]
+		pub fn swap(
+			origin: OriginFor<T>,
+			token_a: AccountIdOf<T>,
+			token_b: AccountIdOf<T>,
+			input_amount: BalanceOf<T>,
+			min_output: BalanceOf<T>,
+		) -> DispatchResultWithPostInfo {
+			let sender = ensure_signed(origin)?;
+
+			let pallet_account = T::pallet_account();
+
+			// Get the exchange info from storage
+			let exchange = Self::exchanges((token_a.clone(), token_b.clone()))
+				.ok_or(Error::<T>::ExchangeDoesNotExist)?;
+
+			// Calculate the output amount
+			let output_amount = Self::get_output_amount(
+				&input_amount,
+				&exchange.token_a_reserve,
+				&exchange.token_b_reserve,
+				&exchange.fee_numerator,
+				&exchange.fee_denominator,
+			)?;
+
+			// Check if the output amount is greater than or equal to the minimum output
+			ensure!(output_amount >= min_output, Error::<T>::InsufficientOutputAmount);
+
+			let transfertoken = Self::transfer_token_from_owner(
+				&token_a,
+				sender.clone(),
+				pallet_account.clone(),
+				input_amount,
+			);
+			let transfertoken = Self::transfer_token_from_owner(
+				&token_b,
+				pallet_account.clone(),
+				sender.clone(),
+				output_amount,
+			);
+
+			// Update the reserves
+			let updated_token_a = exchange
+				.token_a_reserve
+				.checked_add(&input_amount)
+				.ok_or(Error::<T>::Overflow)?;
+
+			let updated_token_b = exchange
+				.token_b_reserve
+				.checked_sub(&output_amount)
+				.ok_or(Error::<T>::Underflow)?;
+
+			Exchanges::<T>::insert(
+				(token_a, token_b),
+				Exchange {
+					token_a_reserve: updated_token_a,
+					token_b_reserve: updated_token_b,
+					..exchange
+				},
+			);
+
+			Ok(().into())
+		}
+
+		#[pallet::call_index(2)]
+		#[pallet::weight(<T as Config>::WeightInfo::create_exchange())]
+		#[transactional]
+		pub fn asset_to_asset(
+			origin: OriginFor<T>,
+			sold_token_a: AccountIdOf<T>,
+			sold_token_b: AccountIdOf<T>,
+			bought_token_a: AccountIdOf<T>,
+			bought_token_b: AccountIdOf<T>,
+			amount: TradeAmount<BalanceOf<T>, BalanceOf<T>>,
+		) -> DispatchResultWithPostInfo {
+			ensure_signed(origin)?;
+			Self::check_trade_amount(&amount)?;
+			Self::get_asset_to_asset_price(
+				sold_token_a,
+				sold_token_b,
+				bought_token_a,
+				bought_token_b,
+				amount,
+			)
+		}
 	}
 
 	impl<T: Config> Pallet<T> {
+		pub(crate) fn get_exchange(asset_id: &AccountIdOf<T>) -> Result<ExchangeOf<T>, Error<T>> {
+			<Exchanges<T>>::get((asset_id.clone(), asset_id.clone()))
+				.ok_or(Error::<T>::ExchangeNotFound)
+		}
+
+		fn check_deadline(deadline: &T::BlockNumber) -> Result<(), Error<T>> {
+			ensure!(deadline >= &<frame_system::Pallet<T>>::block_number(), Error::DeadlinePassed);
+			Ok(())
+		}
+
 		pub fn transfer_token_from_owner(
 			origin: &AccountIdOf<T>,
 			contract_address: AccountIdOf<T>,
@@ -356,6 +473,76 @@ pub mod pallet {
 			}
 		}
 
+		fn get_total_liquidity(token_id: &AccountIdOf<T>) -> Result<BalanceOf<T>, Error<T>> {
+			let method_id: [u8; 4] = [0x18, 0x16, 0x1d, 0x71]; // This is the method ID for the ERC-20 totalSupply function
+
+			let gas_limit: Weight = T::BlockWeights::get().max_block;
+
+			let data = method_id.to_vec();
+
+			let result = pallet_contracts::Pallet::<T>::bare_call(
+				token_id.clone(),
+				token_id.clone(),
+				Zero::zero(),
+				gas_limit,
+				None,
+				data,
+				false,
+				pallet_contracts::Determinism::Deterministic,
+			);
+
+			if let Ok(contract_result) = result.result {
+				if !contract_result.flags.contains(pallet_contracts_primitives::ReturnFlags::REVERT)
+				{
+					let total_liquidity: BalanceOf<T> =
+						Decode::decode(&mut &contract_result.data[..]).unwrap_or(Zero::zero());
+					Ok(total_liquidity)
+				} else {
+					Err(Error::<T>::UnableToFetchTotalLiquidity)
+				}
+			} else {
+				Err(Error::<T>::UnableToFetchTotalLiquidity)
+			}
+		}
+
+		fn check_enough_currency(
+			owner: &AccountIdOf<T>,
+			token_id: &AccountIdOf<T>,
+			required_amount: BalanceOf<T>,
+		) -> Result<(), Error<T>> {
+			let method_id: [u8; 4] = [0x70, 0xa0, 0x8a, 0x31]; // This is the method ID for the ERC-20 balanceOf function
+
+			let gas_limit: Weight = T::BlockWeights::get().max_block;
+
+			let mut data = method_id.to_vec();
+			data.extend(owner.encode());
+
+			let result = pallet_contracts::Pallet::<T>::bare_call(
+				owner.clone(),
+				token_id.clone(),
+				Zero::zero(),
+				gas_limit,
+				None,
+				data,
+				false,
+				pallet_contracts::Determinism::Deterministic,
+			);
+
+			if let Ok(contract_result) = result.result {
+				if !contract_result.flags.contains(pallet_contracts_primitives::ReturnFlags::REVERT)
+				{
+					let balance: BalanceOf<T> =
+						Decode::decode(&mut &contract_result.data[..]).unwrap_or(Zero::zero());
+					balance >= required_amount;
+					Ok(())
+				} else {
+					Err(Error::<T>::BalanceTooLow)
+				}
+			} else {
+				Err(Error::<T>::BalanceTooLow)
+			}
+		}
+
 		#[transactional]
 		fn do_add_liquidity(
 			mut exchange: ExchangeOf<T>,
@@ -366,21 +553,32 @@ pub mod pallet {
 		) -> DispatchResult {
 			// --------------------- Currency & token transfer ---------------------
 
-			let asset_id = exchange.asset_id.clone(); // Clone asset_id
-			let liquidity_token_id = exchange.liquidity_token_id.clone(); // Clone liquidity_token_id
-		
+			let asset_id = exchange.token_a.clone(); // Clone asset_id
+			let liquidity_token_id = exchange.token_b.clone(); // Clone liquidity_token_id
 
 			let pallet_account = T::pallet_account();
 			log::info!("result: {:?}", pallet_account);
 
-			Self::transfer_token_from_owner(&provider, liquidity_token_id, pallet_account.clone(), token_amount);
-			Self::transfer_token_from_owner(&provider, asset_id.clone(), pallet_account.clone(), token_amount);
+			let transfer_from_user_to_pallet = Self::transfer_token_from_owner(
+				&provider,
+				liquidity_token_id.clone(),
+				pallet_account.clone(),
+				token_amount,
+			);
+
+			let trnaasfer_from_pallet_to_user = Self::transfer_token_from_owner(
+				&provider,
+				asset_id.clone(),
+				pallet_account.clone(),
+				token_amount,
+			);
 
 			// -------------------------- Balances update --------------------------
-			
-			exchange.currency_reserve.saturating_accrue(currency_amount);
-			exchange.token_reserve.saturating_accrue(token_amount);
-			<Exchanges<T>>::insert(asset_id.clone(), exchange);
+
+			exchange.token_a_reserve.saturating_accrue(currency_amount);
+			exchange.token_b_reserve.saturating_accrue(token_amount);
+
+			Exchanges::<T>::insert((asset_id.clone(), liquidity_token_id.clone()), exchange);
 
 			// ---------------------------- Emit event -----------------------------
 			Self::deposit_event(Event::LiquidityAdded(
@@ -390,6 +588,162 @@ pub mod pallet {
 				token_amount,
 				liquidity_minted,
 			));
+			Ok(())
+		}
+
+		pub(crate) fn get_output_amount(
+			input_amount: &BalanceOf<T>,
+			input_reserve: &BalanceOf<T>,
+			output_reserve: &BalanceOf<T>,
+			fee_numerator: &BalanceOf<T>,
+			fee_denominator: &BalanceOf<T>,
+		) -> Result<BalanceOf<T>, Error<T>> {
+			debug_assert!(!input_reserve.is_zero());
+			debug_assert!(!output_reserve.is_zero());
+
+			// input_amount_with_fee = input_amount * (fee_denominator - fee_numerator)
+			let input_amount_with_fee = input_amount
+				.checked_mul(&fee_denominator.checked_sub(fee_numerator).ok_or(Error::Overflow)?)
+				.ok_or(Error::Overflow)?;
+
+			// numerator = input_amount_with_fee * output_reserve
+			let numerator =
+				input_amount_with_fee.checked_mul(output_reserve).ok_or(Error::Overflow)?;
+
+			// denominator = input_reserve * fee_denominator + input_amount_with_fee
+			let denominator = input_reserve
+				.checked_mul(fee_denominator)
+				.ok_or(Error::Overflow)?
+				.checked_add(&input_amount_with_fee)
+				.ok_or(Error::Overflow)?;
+
+			Ok(numerator / denominator)
+		}
+
+		pub(crate) fn get_input_amount(
+			output_amount: &BalanceOf<T>,
+			input_reserve: &BalanceOf<T>,
+			output_reserve: &BalanceOf<T>,
+			fee_numerator: &BalanceOf<T>,
+			fee_denominator: &BalanceOf<T>,
+		) -> Result<BalanceOf<T>, Error<T>> {
+			debug_assert!(!input_reserve.is_zero());
+			debug_assert!(!output_reserve.is_zero());
+			ensure!(*output_amount < *output_reserve, Error::<T>::NotEnoughLiquidity);
+
+			// numerator = input_reserve * output_amount * fee_denominator
+			let numerator = input_reserve
+				.checked_mul(&output_amount)
+				.ok_or(Error::Overflow)?
+				.checked_mul(&fee_denominator)
+				.ok_or(Error::Overflow)?;
+
+			let denominator = output_reserve
+				.checked_sub(output_amount)
+				.ok_or(Error::Overflow)?
+				.checked_mul(&fee_denominator.checked_sub(fee_numerator).ok_or(Error::Overflow)?)
+				.ok_or(Error::Overflow)?;
+
+			// (numerator / denominator) + 1
+			Ok((numerator / denominator).saturating_add(BalanceOf::<T>::one()))
+		}
+
+		pub fn get_asset_to_asset_price(
+			sold_token_a: AccountIdOf<T>,
+			sold_token_b: AccountIdOf<T>,
+			bought_token_a: AccountIdOf<T>,
+			bought_token_b: AccountIdOf<T>,
+			amount: TradeAmount<BalanceOf<T>, BalanceOf<T>>,
+		) -> DispatchResultWithPostInfo {
+			let sold_asset_exchange = Self::exchanges((sold_token_a.clone(), sold_token_b.clone()))
+				.ok_or(Error::<T>::ExchangeDoesNotExist)?;
+
+			let bought_asset_exchange =
+				Self::exchanges((bought_token_a.clone(), bought_token_b.clone()))
+					.ok_or(Error::<T>::ExchangeDoesNotExist)?;
+
+			match amount {
+				TradeAmount::FixedInput {
+					input_amount: sold_token_amount,
+					min_output: min_bought_tokens,
+				} => {
+					log::info!(
+						"get_asset_to_asset_price: sold_token_amount: {:?}, min_bought_tokens: {:?}",
+						sold_token_amount,
+						min_bought_tokens);
+
+					let currency_amount = Self::get_output_amount(
+						&sold_token_amount,
+						&sold_asset_exchange.token_a_reserve,
+						&sold_asset_exchange.token_b_reserve,
+						&sold_asset_exchange.fee_numerator,
+						&sold_asset_exchange.fee_denominator,
+					)?;
+					let bought_token_amount = Self::get_output_amount(
+						&currency_amount,
+						&bought_asset_exchange.token_a_reserve,
+						&bought_asset_exchange.token_b_reserve,
+						&bought_asset_exchange.fee_numerator,
+						&bought_asset_exchange.fee_denominator,
+					)?;
+					log::info!(
+						"get_asset_to_asset_price: sold_token_amount: {:?}, bought_token_amount: {:?}",
+						sold_token_amount,
+						bought_token_amount);
+
+					ensure!(
+						bought_token_amount >= min_bought_tokens,
+						Error::<T>::MinBoughtTokensTooHigh
+					);
+					Self::deposit_event(Event::AssetToAssetPriceCalculated(
+						sold_token_a,        // should be an AssetId
+						sold_token_amount,   // should be a Balance
+						bought_token_amount, // should be a Balance
+					));
+				},
+				TradeAmount::FixedOutput {
+					max_input: max_sold_tokens,
+					output_amount: bought_token_amount,
+				} => {
+					let currency_amount = Self::get_input_amount(
+						&bought_token_amount,
+						&bought_asset_exchange.token_a_reserve,
+						&bought_asset_exchange.token_b_reserve,
+						&bought_asset_exchange.fee_numerator,
+						&bought_asset_exchange.fee_denominator,
+					)?;
+					let sold_token_amount = Self::get_input_amount(
+						&currency_amount,
+						&sold_asset_exchange.token_a_reserve,
+						&sold_asset_exchange.token_b_reserve,
+						&sold_asset_exchange.fee_numerator,
+						&sold_asset_exchange.fee_denominator,
+					)?;
+					ensure!(sold_token_amount <= max_sold_tokens, Error::<T>::MaxSoldTokensTooLow);
+					Self::deposit_event(Event::AssetToAssetPriceCalculated(
+						sold_token_a,        
+						sold_token_amount,   
+						bought_token_amount,
+					));
+				},
+			}
+
+			Ok(().into())
+		}
+
+		fn check_trade_amount<A: Zero, B: Zero>(
+			amount: &TradeAmount<A, B>,
+		) -> Result<(), Error<T>> {
+			match amount {
+				TradeAmount::FixedInput { input_amount, min_output } => {
+					ensure!(!input_amount.is_zero(), Error::TradeAmountIsZero);
+					ensure!(!min_output.is_zero(), Error::TradeAmountIsZero);
+				},
+				TradeAmount::FixedOutput { output_amount, max_input } => {
+					ensure!(!output_amount.is_zero(), Error::TradeAmountIsZero);
+					ensure!(!max_input.is_zero(), Error::TradeAmountIsZero);
+				},
+			};
 			Ok(())
 		}
 	}
