@@ -18,6 +18,8 @@ type ContractsBalanceOf<T> =
 	<<T as pallet_contracts::Config>::Currency as frame_support::traits::Currency<
 		<T as frame_system::Config>::AccountId,
 	>>::Balance;
+// (sold_token_amount, currency_amount, bought_token_amount)
+type AssetToAssetPrice<T> = (BalanceOf<T>, BalanceOf<T>);
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -168,6 +170,8 @@ pub mod pallet {
 		ExchangeAlreadyExists,
 		InsufficientOutputAmount,
 		ExchangeDoesNotExist,
+		ArithmeticUnderflow,
+		ArithmeticOverflow,
 		/// Provided liquidity token ID is already taken
 		TokenIdTaken,
 		/// Not enough free balance to add liquidity or perform trade
@@ -360,18 +364,19 @@ pub mod pallet {
 			// Check if the output amount is greater than or equal to the minimum output
 			ensure!(output_amount >= min_output, Error::<T>::InsufficientOutputAmount);
 
-			let transfertoken = Self::transfer_token_from_owner(
+			Self::transfer_token_from_owner(
 				&token_a,
 				sender.clone(),
 				pallet_account.clone(),
 				input_amount,
-			);
-			let transfertoken = Self::transfer_token_from_owner(
+			)?;
+
+			Self::transfer_token_from_owner(
 				&token_b,
 				pallet_account.clone(),
 				sender.clone(),
 				output_amount,
-			);
+			)?;
 
 			// Update the reserves
 			let updated_token_a = exchange
@@ -407,15 +412,41 @@ pub mod pallet {
 			bought_token_b: AccountIdOf<T>,
 			amount: TradeAmount<BalanceOf<T>, BalanceOf<T>>,
 		) -> DispatchResultWithPostInfo {
-			ensure_signed(origin)?;
+			let who = ensure_signed(origin)?;
+	
+			// Fetching the exchanges
+			let sold_asset_exchange = Self::exchanges((sold_token_a.clone(), sold_token_b.clone()))
+				.ok_or(Error::<T>::ExchangeDoesNotExist)?;
+	
+			let bought_asset_exchange = Self::exchanges((bought_token_a.clone(), bought_token_b.clone()))
+				.ok_or(Error::<T>::ExchangeDoesNotExist)?;
+	
+			// Verifying the trade amount
 			Self::check_trade_amount(&amount)?;
-			Self::get_asset_to_asset_price(
-				sold_token_a,
-				sold_token_b,
-				bought_token_a,
-				bought_token_b,
+	
+			// Fetching the sold and bought token amounts
+			let (sold_token_amount, bought_token_amount) = Self::get_asset_to_asset_price(
+				&sold_asset_exchange,
+				&bought_asset_exchange,
 				amount,
-			)
+			)?;
+	
+			// Implementing the trade
+			// You need to ensure that the origin account has enough balance of the sold token
+			// Also, you need to transfer the sold tokens from the origin account to the exchange
+			// And transfer the bought tokens from the exchange to the origin account
+			// After these operations, the reserve of the sold tokens will increase in the sold_asset_exchange
+			// And the reserve of the bought tokens will decrease in the bought_asset_exchange
+	
+			// Updating the reserves
+			let updated_sold_exchange = Self::update_reserve_after_sell(&sold_asset_exchange, sold_token_amount, sold_token_a == sold_asset_exchange.token_a)?;
+			let updated_bought_exchange = Self::update_reserve_after_buy(&bought_asset_exchange, bought_token_amount, bought_token_a == bought_asset_exchange.token_a)?;
+	
+			// Updating the exchanges in the storage
+			Self::update_exchange_storage((sold_token_a.clone(), sold_token_b.clone()), updated_sold_exchange);
+			Self::update_exchange_storage((bought_token_a.clone(), bought_token_b.clone()), updated_bought_exchange);
+	
+			Ok(().into())
 		}
 	}
 
@@ -649,19 +680,10 @@ pub mod pallet {
 		}
 
 		pub fn get_asset_to_asset_price(
-			sold_token_a: AccountIdOf<T>,
-			sold_token_b: AccountIdOf<T>,
-			bought_token_a: AccountIdOf<T>,
-			bought_token_b: AccountIdOf<T>,
+			sold_asset_exchange: &Exchange<T>,
+			bought_asset_exchange: &Exchange<T>,
 			amount: TradeAmount<BalanceOf<T>, BalanceOf<T>>,
-		) -> DispatchResultWithPostInfo {
-			let sold_asset_exchange = Self::exchanges((sold_token_a.clone(), sold_token_b.clone()))
-				.ok_or(Error::<T>::ExchangeDoesNotExist)?;
-
-			let bought_asset_exchange =
-				Self::exchanges((bought_token_a.clone(), bought_token_b.clone()))
-					.ok_or(Error::<T>::ExchangeDoesNotExist)?;
-
+		) -> Result<AssetToAssetPrice<T>, Error<T>> {
 			match amount {
 				TradeAmount::FixedInput {
 					input_amount: sold_token_amount,
@@ -695,11 +717,10 @@ pub mod pallet {
 						bought_token_amount >= min_bought_tokens,
 						Error::<T>::MinBoughtTokensTooHigh
 					);
-					Self::deposit_event(Event::AssetToAssetPriceCalculated(
-						sold_token_a,        // should be an AssetId
+					Ok((
 						sold_token_amount,   // should be a Balance
 						bought_token_amount, // should be a Balance
-					));
+					))
 				},
 				TradeAmount::FixedOutput {
 					max_input: max_sold_tokens,
@@ -720,15 +741,13 @@ pub mod pallet {
 						&sold_asset_exchange.fee_denominator,
 					)?;
 					ensure!(sold_token_amount <= max_sold_tokens, Error::<T>::MaxSoldTokensTooLow);
-					Self::deposit_event(Event::AssetToAssetPriceCalculated(
-						sold_token_a,        
-						sold_token_amount,   
-						bought_token_amount,
-					));
+
+					Ok((
+						sold_token_amount,   // should be a Balance
+						bought_token_amount, // should be a Balance
+					))
 				},
 			}
-
-			Ok(().into())
 		}
 
 		fn check_trade_amount<A: Zero, B: Zero>(
@@ -745,6 +764,76 @@ pub mod pallet {
 				},
 			};
 			Ok(())
+		}
+
+		fn swap_asset_for_asset(
+			sold_asset_exchange: ExchangeOf<T>,
+			bought_asset_exchange: ExchangeOf<T>,
+			sold_token_amount: BalanceOf<T>,
+			bought_token_amount: BalanceOf<T>,
+			buyer: AccountIdOf<T>,
+			recipient: AccountIdOf<T>,
+		) -> DispatchResult {
+			let pallet_account: AccountIdOf<T> = T::pallet_account();
+			Ok(())
+		}
+
+		   // Update the reserves of an exchange after a sell operation
+		   fn update_reserve_after_sell(
+			exchange: &Exchange<T>,
+			sold_amount: BalanceOf<T>,
+			is_token_a: bool
+		) -> Result<Exchange<T>, DispatchError> {
+			let mut updated_exchange = exchange.clone();
+	
+			if is_token_a {
+				updated_exchange.token_a_reserve = Self::reduce_reserve(exchange.token_a_reserve, sold_amount)?;
+			} else {
+				updated_exchange.token_b_reserve = Self::reduce_reserve(exchange.token_b_reserve, sold_amount)?;
+			}
+			
+			Ok(updated_exchange)
+		}
+	
+		// Update the reserves of an exchange after a buy operation
+		fn update_reserve_after_buy(
+			exchange: &Exchange<T>,
+			bought_amount: BalanceOf<T>,
+			is_token_a: bool
+		) -> Result<Exchange<T>, DispatchError> {
+			let mut updated_exchange = exchange.clone();
+	
+			if is_token_a {
+				updated_exchange.token_a_reserve = Self::increase_reserve(exchange.token_a_reserve, bought_amount)?;
+			} else {
+				updated_exchange.token_b_reserve = Self::increase_reserve(exchange.token_b_reserve, bought_amount)?;
+			}
+	
+			Ok(updated_exchange)
+		}
+	
+		// Update the exchange in storage
+		fn update_exchange_storage(
+			token_pair: (T::AccountId, T::AccountId),
+			exchange: Exchange<T>
+		) {
+			Exchanges::<T>::insert(&token_pair, exchange);
+		}
+	
+		// Decrease reserve, checking for underflow
+		fn reduce_reserve(
+			reserve: BalanceOf<T>, 
+			amount: BalanceOf<T>
+		) -> Result<BalanceOf<T>,  Error<T>> {
+			reserve.checked_sub(&amount).ok_or(Error::<T>::ArithmeticUnderflow)
+		}
+	
+		// Increase reserve, checking for overflow
+		fn increase_reserve(
+			reserve: BalanceOf<T>, 
+			amount: BalanceOf<T>
+		) -> Result<BalanceOf<T>,  Error<T>> {
+			reserve.checked_add(&amount).ok_or(Error::<T>::ArithmeticOverflow)
 		}
 	}
 }
