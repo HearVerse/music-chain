@@ -49,6 +49,7 @@ use frame_system::{
 	limits::{BlockLength, BlockWeights},
 	EnsureRoot, EnsureRootWithSuccess, EnsureSigned, EnsureWithSuccess,
 };
+
 pub use node_primitives::{AccountId, Signature};
 use node_primitives::{AccountIndex, Balance, BlockNumber, Hash, Index, Moment};
 use pallet_election_provider_multi_phase::SolutionAccuracyOf;
@@ -1672,6 +1673,32 @@ impl frame_benchmarking_pallet_pov::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 }
 
+pub type AssetBalance = Balance;
+pub type AssetId = u32;
+
+parameter_types! {
+	pub const DexPalletId: PalletId = PalletId(*b"dex_mock");
+}
+
+impl pallet_dex::Config for Runtime {
+	type PalletId = DexPalletId;
+	type RuntimeEvent = RuntimeEvent;
+	type Currency = Balances;
+	type AssetBalance = AssetBalance;
+	type AssetToCurrencyBalance = sp_runtime::traits::Identity;
+	type CurrencyToAssetBalance = sp_runtime::traits::Identity;
+	type AssetId = AssetId;
+	type Assets = Assets;
+	type AssetRegistry = Assets;
+	type WeightInfo = ();
+	// Provider fee is 0.3%
+	type ProviderFeeNumerator = ConstU128<3>;
+	type ProviderFeeDenominator = ConstU128<1000>;
+	type MinDeposit = ConstU128<1>;
+}
+
+
+
 construct_runtime!(
 	pub enum Runtime where
 		Block = Block,
@@ -1738,6 +1765,8 @@ construct_runtime!(
 		FastUnstake: pallet_fast_unstake,
 		MessageQueue: pallet_message_queue,
 		Pov: frame_benchmarking_pallet_pov,
+		DEX: pallet_dex,
+
 	}
 );
 
@@ -1862,6 +1891,8 @@ impl_runtime_apis! {
 			VERSION
 		}
 
+		
+
 		fn execute_block(block: Block) {
 			Executive::execute_block(block);
 		}
@@ -1870,6 +1901,7 @@ impl_runtime_apis! {
 			Executive::initialize_block(header)
 		}
 	}
+
 
 	impl sp_api::Metadata<Block> for Runtime {
 		fn metadata() -> OpaqueMetadata {

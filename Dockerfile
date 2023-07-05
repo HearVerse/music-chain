@@ -1,18 +1,23 @@
-# Use the Parity CI Linux image as a base
-FROM paritytech/ci-linux:production as builder
-WORKDIR /substrate
+FROM paritytech/ci-linux:production as build
 
-# Copy the entire project folder into the Docker container
-COPY . /substrate
+WORKDIR /music-chain
+COPY . .
+RUN cargo build --release
 
-# Start a new build stage and use the same base image
-FROM paritytech/ci-linux:production
+FROM ubuntu:20.04
+WORKDIR /node
 
-# Copy the entire project folder from the builder stage to the new stage
-COPY --from=builder /substrate /substrate
+# Copy the node binary.
+COPY --from=build /music-chain/target/release/substrate .
 
-# Set the working directory
-WORKDIR /substrate
+# Install root certs, see: https://github.com/paritytech/substrate/issues/9984
+RUN apt update && \
+    apt install -y ca-certificates && \
+    update-ca-certificates && \
+    apt remove ca-certificates -y && \
+    rm -rf /var/lib/apt/lists/*
 
-# Build the project and run the compiled binary
-ENTRYPOINT cargo build --release && ./target/release/substrate --dev
+EXPOSE 9944
+# Exposing unsafe RPC methods is needed for testing but should not be done in
+# production.
+CMD [ "./substrate", "--dev", "--ws-external", "--rpc-methods=Unsafe" ]

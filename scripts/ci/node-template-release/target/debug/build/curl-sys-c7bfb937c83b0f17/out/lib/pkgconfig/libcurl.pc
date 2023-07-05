@@ -25,10 +25,10 @@
 # This should most probably benefit from getting a "Requires:" field added
 # dynamically by configure.
 #
-prefix=/home/kianoush/projects/substrate/scripts/ci/node-template-release/target/debug/build/curl-sys-c7bfb937c83b0f17/out
+prefix=/home/kianoush/projects/music-chain/scripts/ci/node-template-release/target/debug/build/curl-sys-c7bfb937c83b0f17/out
 exec_prefix=
-libdir=/home/kianoush/projects/substrate/scripts/ci/node-template-release/target/debug/build/curl-sys-c7bfb937c83b0f17/out/lib
-includedir=/home/kianoush/projects/substrate/scripts/ci/node-template-release/target/debug/build/curl-sys-c7bfb937c83b0f17/out/include
+libdir=/home/kianoush/projects/music-chain/scripts/ci/node-template-release/target/debug/build/curl-sys-c7bfb937c83b0f17/out/lib
+includedir=/home/kianoush/projects/music-chain/scripts/ci/node-template-release/target/debug/build/curl-sys-c7bfb937c83b0f17/out/include
 supported_protocols=""
 supported_features=""
 
